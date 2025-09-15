@@ -34,13 +34,15 @@ def load_yolo_model(model_path):
 model = load_yolo_model(model_file)
 
 # ----------------------------
-# 2. Public AI Model Integration
+# 2. Public AI Model Integration (Updated)
 # ----------------------------
+import time
+
 def get_llm_commentary(defects_info):
     """
-    Get AI commentary using publicly accessible models
+    Get AI commentary using Hugging Face Inference API models.
+    Retries models if loading or rate limited, and parses responses.
     """
-    # Prepare the prompt
     prompt = f"""
     As a structural engineering expert, analyze these concrete defects detected in a warehouse:
     {defects_info}
@@ -54,74 +56,66 @@ def get_llm_commentary(defects_info):
     Keep the response concise and professional (under 200 words).
     """
     
-    # Try multiple public API endpoints
+    HF_TOKEN = st.secrets.get("HUGGINGFACEHUB_API_TOKEN")
+    if not HF_TOKEN:
+        st.warning("Hugging Face API token not found in Streamlit secrets. AI models will not work.")
+        return None
+
     endpoints = [
         {
             "name": "Hugging Face Inference API (Free)",
             "url": "https://api-inference.huggingface.co/models/google/flan-t5-base",
-            "headers": {},
-            "payload": {"inputs": prompt}
+            "headers": {"Authorization": f"Bearer {HF_TOKEN}"},
+            "payload": {"inputs": prompt, "parameters": {"max_new_tokens": 200, "temperature": 0.7}}
         },
         {
             "name": "Hugging Face Inference API (Alternative)",
             "url": "https://api-inference.huggingface.co/models/microsoft/DialoGPT-small",
-            "headers": {},
-            "payload": {"inputs": prompt, "parameters": {"max_new_tokens": 300}}
-        },
-        {
-            "name": "Hugging Face Spaces API",
-            "url": "https://tomfangio-llama-2-7b-chat.hf.space/api/chat",
-            "headers": {"Content-Type": "application/json"},
-            "payload": {
-                "data": [
-                    prompt,
-                    "You are a structural engineering expert analyzing concrete defects.",
-                    0.7,
-                    256,
-                    0.9,
-                    1.2
-                ]
-            }
+            "headers": {"Authorization": f"Bearer {HF_TOKEN}"},
+            "payload": {"inputs": prompt, "parameters": {"max_new_tokens": 300, "temperature": 0.7}}
         }
     ]
     
     for endpoint in endpoints:
         try:
             with st.spinner(f"Trying {endpoint['name']}..."):
-                response = requests.post(
-                    endpoint["url"],
-                    headers=endpoint["headers"],
-                    json=endpoint["payload"],
-                    timeout=20
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
+                for attempt in range(3):  # Retry up to 3 times if model loading or rate limited
+                    response = requests.post(
+                        endpoint["url"],
+                        headers=endpoint["headers"],
+                        json=endpoint["payload"],
+                        timeout=20
+                    )
                     
-                    # Parse different response formats
-                    if isinstance(result, list):
-                        if len(result) > 0:
+                    if response.status_code == 200:
+                        result = response.json()
+                        # Parse different response formats
+                        if isinstance(result, list) and len(result) > 0:
                             if isinstance(result[0], dict) and 'generated_text' in result[0]:
                                 return result[0]['generated_text']
                             elif isinstance(result[0], str):
                                 return result[0]
-                    elif isinstance(result, dict):
-                        if 'generated_text' in result:
-                            return result['generated_text']
-                        elif 'data' in result and isinstance(result['data'], list) and len(result['data']) > 0:
-                            return result['data'][0]
+                        elif isinstance(result, dict):
+                            if 'generated_text' in result:
+                                return result['generated_text']
+                            elif 'data' in result and isinstance(result['data'], list) and len(result['data']) > 0:
+                                return result['data'][0]
+                        # If unrecognized format, return raw JSON for debugging
+                        return json.dumps(result, indent=2)
                     
-                    # If we can't parse it, just return the raw JSON
-                    return json.dumps(result, indent=2)
-                    
-                elif response.status_code == 503:
-                    continue  # Model loading, try next endpoint
-                    
+                    elif response.status_code in [503, 429]:
+                        # Model loading or rate limited, wait and retry
+                        time.sleep(5)
+                        continue
+                    else:
+                        st.warning(f"{endpoint['name']} returned {response.status_code}: {response.text}")
+                        break
         except Exception as e:
-            continue  # Try next endpoint if this one fails
+            st.warning(f"{endpoint['name']} failed: {e}")
     
-    # If all APIs fail, use local expert system
+    # If all endpoints fail, return None
     return None
+
 
 # ----------------------------
 # 3. Local Expert System (Primary)
