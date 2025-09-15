@@ -1,5 +1,7 @@
 streamlit
 ultralytics
+torch
 Pillow
-gdown
+opencv-python-headless
 pandas
+requests
