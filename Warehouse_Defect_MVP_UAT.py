@@ -7,6 +7,7 @@ import requests
 import json
 import time
 from openai import OpenAI
+from datetime import datetime
 
 # ----------------------------
 # 1. Model setup
@@ -39,9 +40,9 @@ model = load_yolo_model(model_file)
 # ----------------------------
 # 2. Hugging Face LLM Integration with OpenAI-compatible API
 # ----------------------------
-def get_llm_commentary(defects):
+def get_llm_commentary(defects, inspection_context):
     """
-    Get professional engineering analysis using Hugging Face's OpenAI-compatible API
+    Get professional engineering analysis with pre/post tenancy comparison
     """
     # Get API key from Streamlit secrets
     try:
@@ -66,7 +67,7 @@ def get_llm_commentary(defects):
             api_key=api_key,
         )
         
-        # Prepare detailed defect information with explicit types
+        # Prepare detailed defect information
         defects_info = "DETECTED DEFECT TYPES AND QUANTITIES:\n"
         defect_counts = {}
         for defect in defects:
@@ -80,58 +81,62 @@ def get_llm_commentary(defects):
         for i, defect in enumerate(defects, 1):
             defects_info += f"{i}. {defect['type']} (confidence: {defect['confidence']:.2f})\n"
         
-        # Professional engineering prompt with specific technical requirements
+        # Professional engineering prompt with tenancy comparison
         prompt = f"""
-        As a licensed structural engineer with expertise in concrete pathology, provide a detailed technical analysis of these concrete defects:
+        As a licensed structural engineer and building surveyor, provide a comprehensive analysis of these concrete defects with specific focus on tenancy context:
         
+        INSPECTION CONTEXT: {inspection_context}
+        
+        DEFECTS IDENTIFIED:
         {defects_info}
         
-        For EACH specific defect type identified above, provide a comprehensive engineering assessment including:
+        Please provide a detailed analysis including:
         
-        1. DEFECT IDENTIFICATION AND DESCRIPTION:
-           - Precisely define what this defect type is (e.g., "Hairline cracks are micro-fissures typically < 0.1mm wide...")
-           - Detailed physical description of the defect appearance
-           - Typical locations where this defect occurs in concrete structures
+        1. DEFECT-SPECIFIC ANALYSIS:
+           - Precise definition and description of each defect type
+           - Engineering significance and severity rating
+           - Root cause analysis for each defect type
         
-        2. ENGINEERING SIGNIFICANCE:
-           - Structural implications and severity rating (Minor, Moderate, Severe, Critical)
-           - Specific risks associated with this defect type
-           - Potential for progression and long-term consequences
+        2. TENANCY TIMELINE ASSESSMENT:
+           - **Pre-Tenancy vs During Tenancy Comparison**: 
+             * Which defects are likely pre-existing vs tenant-induced?
+             * Typical defect progression timelines for each defect type
+             * Expected vs accelerated deterioration rates
         
-        3. ROOT CAUSE ANALYSIS:
-           - Specific causes for this particular defect type
-           - Material factors, construction practices, environmental conditions, or loading issues
-           - Timeline of development (immediate vs. long-term manifestation)
+        3. LIABILITY ASSESSMENT:
+           - **Landlord vs Tenant Responsibility**: 
+             * Defects typically considered landlord responsibility
+             * Defects that may be tenant-induced or exacerbated
+             * Maintenance obligation boundaries
         
-        4. QUANTITATIVE ASSESSMENT:
-           - Typical dimensions and characteristics of this defect type
-           - Measurement criteria and acceptance limits per relevant standards
-           - Monitoring requirements and frequency
+        4. LEGAL AND INSURANCE IMPLICATIONS:
+           - Documentation requirements for tenancy disputes
+           - Insurance claim considerations
+           - Dilapidation schedule implications
         
-        5. DEFECT-SPECIFIC MITIGATION:
-           - Recommended repair methods specifically for this defect type
-           - Urgency of intervention and safety precautions
-           - Preventive measures to avoid recurrence
+        5. DEFECT-SPECIFIC MITIGATION WITH TENANCY CONTEXT:
+           - Urgency of repairs based on tenancy status
+           - Tenant safety considerations
+           - Repair scheduling around tenancy arrangements
         
-        Please structure your response by DEFECT TYPE with clear headings for each defect category.
-        For each defect type, start with: "**DEFECT TYPE: [defect name]**" followed by detailed analysis.
-        Use precise engineering terminology and reference appropriate standards (ACI, EN, ASTM).
+        Please structure your response with clear sections for each defect type and specific tenancy context analysis.
+        Reference relevant building codes, tenancy laws, and maintenance standards.
         """
         
-        with st.spinner("Conducting defect-specific structural analysis..."):
+        with st.spinner("Conducting tenancy context analysis..."):
             response = client.chat.completions.create(
                 model="meta-llama/Meta-Llama-3-8B-Instruct",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a senior structural engineering consultant specializing in concrete defect analysis. You provide extremely detailed, defect-specific assessments that explicitly define, describe, and analyze each type of defect found. Your analysis is organized by defect type with clear headings and includes specific engineering definitions, descriptions, and recommendations for each defect category."
+                        "content": "You are a senior structural engineer and building surveyor with expertise in tenancy defect analysis, liability assessment, and building maintenance. You provide detailed analysis comparing pre-tenancy vs during-tenancy conditions, clearly distinguishing landlord vs tenant responsibilities, and offering practical advice for tenancy context."
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                max_tokens=1000,
+                max_tokens=1200,
                 temperature=0.2,
                 top_p=0.8,
                 stream=False
@@ -143,10 +148,29 @@ def get_llm_commentary(defects):
         return f"Unable to generate engineering analysis: {str(e)}"
 
 # ----------------------------
-# 3. Streamlit UI
+# 3. Streamlit UI with Tenancy Context
 # ----------------------------
 st.title("🏗️ Warehouse Concrete Structural Assessment")
-st.write("Upload an image of concrete surfaces for detailed defect analysis and specific engineering recommendations.")
+st.write("Upload an image for detailed defect analysis with pre-tenancy vs during-tenancy comparison.")
+
+# Tenancy context selection
+st.subheader("📋 Inspection Context")
+inspection_context = st.radio(
+    "Select inspection context:",
+    ["Pre-Tenancy (Before Move-In)", "During Tenancy (Occupied)", "Post-Tenancy (Move-Out)"],
+    help="This helps determine liability and appropriate repair strategies"
+)
+
+# Additional tenancy information
+if inspection_context != "Pre-Tenancy (Before Move-In)":
+    tenancy_duration = st.slider("Tenancy Duration (months):", 1, 120, 12)
+    building_usage = st.selectbox(
+        "Building Usage:",
+        ["General Storage", "Light Manufacturing", "Heavy Machinery", "Cold Storage", "Distribution Center", "Other"]
+    )
+else:
+    tenancy_duration = 0
+    building_usage = "Not Applicable"
 
 # Check if we have the API key set up
 try:
@@ -154,7 +178,7 @@ try:
     if not has_api_key:
         st.warning("Hugging Face API token not found in secrets. Professional engineering analysis may not be available.")
     else:
-        st.success("Hugging Face API key authenticated. Ready for detailed defect analysis.")
+        st.success("Hugging Face API key authenticated. Ready for tenancy context analysis.")
 except:
     st.warning("Unable to verify API configuration. Some features may be limited.")
 
@@ -163,7 +187,7 @@ uploaded_file = st.file_uploader("Choose structural inspection image...", type=[
 if uploaded_file is not None:
     # Open the image
     image = Image.open(uploaded_file)
-    st.image(image, caption="Structural Inspection Image", use_container_width=True)
+    st.image(image, caption=f"Inspection Image - {inspection_context}", use_container_width=True)
 
     # Run detection
     with st.spinner("Analyzing concrete defects..."):
@@ -205,75 +229,97 @@ if uploaded_file is not None:
         for i, defect in enumerate(defects, 1):
             st.write(f"{i}. **{defect['type']}** - Detection confidence: {defect['confidence']*100:.1f}%")
         
-        # Get and display professional engineering analysis
-        st.subheader("🧠 Detailed Defect Analysis")
-        st.info("**Analysis includes:** Defect definition, engineering significance, root causes, quantitative assessment, and specific mitigation strategies for each defect type.")
+        # Prepare inspection context for analysis
+        context_info = f"""
+        Inspection Type: {inspection_context}
+        Tenancy Duration: {tenancy_duration} months
+        Building Usage: {building_usage}
+        Inspection Date: {datetime.now().strftime('%Y-%m-%d')}
+        """
         
-        with st.spinner("Generating comprehensive defect-specific analysis..."):
-            analysis = get_llm_commentary(defects)
+        # Get and display professional engineering analysis
+        st.subheader("🧠 Comprehensive Defect Analysis with Tenancy Context")
+        st.info(f"**Analysis includes:** Defect analysis + Tenancy timeline assessment + Liability determination + {inspection_context} recommendations")
+        
+        with st.spinner("Generating tenancy context analysis..."):
+            analysis = get_llm_commentary(defects, context_info)
         
         st.write(analysis)
         
-        # Add technical references with detailed defect definitions
-        with st.expander("📚 Concrete Defect Definitions & Standards"):
+        # Add tenancy-specific references
+        with st.expander("📚 Tenancy Defect Liability Guidelines"):
             st.write("""
-            **Detailed Defect Classification:**
+            **Typical Liability Classifications:**
             
-            **HAIRLINE CRACKS:**
-            - **Definition**: Very fine cracks typically < 0.1mm wide
-            - **Appearance**: Barely visible, often called "craze cracking"
-            - **Causes**: Plastic shrinkage, early thermal contraction
-            - **Standards**: ACI 224R, ASTM C856
+            **LANDLORD RESPONSIBILITY (Usually):**
+            - Structural defects pre-dating tenancy
+            - Foundation settlement issues
+            - Roof leaks and water penetration
+            - Pre-existing corrosion or decay
+            - Building code compliance issues
             
-            **FINE CRACKS:**
-            - **Definition**: Cracks 0.1-0.3mm wide
-            - **Appearance**: Visible but narrow fissures
-            - **Causes**: Drying shrinkage, thermal movement
-            - **Standards**: ACI 224R, EN 1992-1-1
+            **TENANT RESPONSIBILITY (Usually):**
+            - Damage from improper use or overload
+            - Lack of routine maintenance
+            - Accident-related damage
+            - Modifications without approval
+            - Neglect leading to deterioration
             
-            **MEDIUM CRACKS:**
-            - **Definition**: Cracks 0.3-1.0mm wide
-            - **Appearance**: Clearly visible, may allow minor moisture penetration
-            - **Causes**: Structural loading, settlement, restraint conditions
-            - **Standards**: ACI 318, BS 8110
+            **SHARED RESPONSIBILITY (Case-by-case):**
+            - Wear and tear vs actual damage
+            - Pre-existing conditions exacerbated by use
+            - Maintenance issues that weren't reported
+            - Environmental factors affecting both parties
             
-            **SPALLING:**
-            - **Definition**: Localized concrete breakdown and disintegration
-            - **Appearance**: Crumbling, popping, or breaking away of surface
-            - **Causes**: Corrosion expansion, freeze-thaw, impact damage
-            - **Standards**: ACI 201.1R, EN 1504
+            **Documentation Requirements:**
+            - Pre-tenancy inspection reports with photos
+            - Regular maintenance records
+            - Tenant reporting timelines
+            - Professional assessment documentation
+            """)
+        
+        # Additional tenancy-specific recommendations
+        with st.expander("💼 Practical Tenancy Advice"):
+            st.write("""
+            **For Pre-Tenancy Inspections:**
+            - Document all existing defects thoroughly with photos
+            - Create detailed dilapidation schedule
+            - Establish baseline condition for future reference
+            - Consider professional building survey
             
-            **CORROSION STAINS:**
-            - **Definition**: Rust discoloration indicating reinforcement corrosion
-            - **Appearance**: Brownish-red stains, often following crack patterns
-            - **Causes**: Chloride ingress, carbonation, inadequate cover
-            - **Standards**: ASTM C876, ACI 222R
+            **For During-Tenancy Issues:**
+            - Report defects to landlord promptly
+            - Document communication timelines
+            - Maintain records of any repairs undertaken
+            - Consider independent assessment for disputes
             
-            **EFFLORESCENCE:**
-            - **Definition**: White salt deposits on concrete surface
-            - **Appearance**: Powdery white residue, often crystalline
-            - **Causes**: Moisture migration dissolving and depositing salts
-            - **Standards**: ASTM C67, ACI 201.1R
-            
-            **SCALING:**
-            - **Definition**: Surface deterioration exposing aggregate
-            - **Appearance**: Rough texture, aggregate visibility
-            - **Causes**: Freeze-thaw cycles, deicer chemicals
-            - **Standards**: ASTM C672, ACI 201.1R
+            **For Post-Tenancy Assessments:**
+            - Compare with pre-tenancy documentation
+            - Assess fair wear and tear vs actual damage
+            - Consider depreciation for aged defects
+            - Seek professional mediation for disputes
             """)
         
     else:
         st.success("✅ No structural defects detected! The concrete elements appear to be in sound condition.")
+        
+        # Even with no defects, provide tenancy context advice
+        if inspection_context == "Pre-Tenancy (Before Move-In)":
+            st.info("**Pre-Tenancy Recommendation:** Document this sound condition with timestamped photos for future reference.")
+        elif inspection_context == "During Tenancy (Occupied)":
+            st.info("**During Tenancy Status:** No tenant-induced defects detected. Continue regular maintenance schedule.")
+        else:
+            st.info("**Post-Tenancy Status:** No additional defects beyond normal wear and tear detected.")
 
-# Add professional footer
+# Add professional footer with tenancy context
 st.markdown("---")
 st.markdown("""
 **Disclaimer**: 
-- This analysis provides preliminary engineering assessment based on visual inspection data
-- Field verification and detailed structural analysis by licensed engineers is recommended for final decisions
-- All recommendations should be verified against local building codes and specific site conditions
-- Detection accuracy is dependent on image quality, lighting, and surface conditions
+- This analysis provides preliminary assessment for informational purposes only
+- Final liability determinations should be made by qualified building surveyors
+- Local tenancy laws and lease agreements take precedence over general guidelines
+- Always consult legal professionals for tenancy dispute resolution
 """)
 
 # Add engineering certification note
-st.caption("_Analysis generated using AI-assisted engineering assessment tools. Final engineering decisions should be made by qualified professionals._")
+st.caption("_Analysis generated for informational purposes. Final determinations should be made by qualified building surveyors and legal professionals._")
