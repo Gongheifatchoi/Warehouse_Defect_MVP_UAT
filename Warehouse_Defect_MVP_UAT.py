@@ -8,8 +8,8 @@ import gdown
 # 模型路径与 Google Drive 链接
 # ----------------------------
 MODEL_PATH = "best.pt"
-#MODEL_ID = "你的文件ID"  # 替换为你的 Google Drive 文件ID
-MODEL_URL = f"https://github.com/Gongheifatchoi/Warehouse_Defect_MVP_UAT/blob/main/best.pt"
+MODEL_ID = "你的文件ID"  # 替换为你的 Google Drive 文件ID
+MODEL_URL = f"https://drive.google.com/uc?id={MODEL_ID}"
 
 # ----------------------------
 # 下载模型
@@ -45,14 +45,30 @@ if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # 预测
+    # 推理
     results = model(image)
 
     # 标注图片
     annotated_image = results[0].plot()
-    st.image(annotated_image, caption="Detected Defects", use_column_width=True)
+    st.image(annotated_image, caption="Prediction Result", use_column_width=True)
 
-    # 输出类别和置信度
-    if hasattr(results[0], 'probs'):
-        probs = results[0].probs.tolist()
-        st.write("Class Probabilities:", probs)
+    # 输出预测信息
+    if model.task == "classify":
+        # 分类模型
+        if hasattr(results[0], 'probs'):
+            probs = results[0].probs.tolist()
+            class_name = results[0].names[int(results[0].probs.argmax())]
+            st.write(f"Predicted Class: {class_name}")
+            st.write("Class Probabilities:", probs)
+        else:
+            st.write("No classification probabilities available.")
+    elif model.task == "detect":
+        # 检测模型
+        if hasattr(results[0], 'boxes') and len(results[0].boxes) > 0:
+            st.write("Detected objects:")
+            for box in results[0].boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                st.write(f"- Class: {results[0].names[cls_id]}, Confidence: {conf:.2f}")
+        else:
+            st.write("No objects detected.")
