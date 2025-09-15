@@ -1,10 +1,22 @@
-streamlit
-ultralytics
-torch
-Pillow
+# Streamlit for UI
+streamlit==1.29.0
+
+# YOLO model
+ultralytics==8.0.127
+
+# PyTorch for YOLO (CPU version works on Streamlit Cloud)
+torch==2.2.0+cpu
+torchvision==0.16.1+cpu
+
+# Image processing
+Pillow==10.2.0
+
+# OpenCV headless (avoids GUI issues)
 opencv-python-headless==4.8.1.78
-pandas
-requests
-gdown
-transformers
-sentencepiece
+
+# Data handling and HTTP requests
+pandas==2.1.1
+requests==2.31.0
+
+# For downloading files from Google Drive
+gdown==4.6.6
