@@ -4,7 +4,6 @@ from PIL import Image
 from ultralytics import YOLO
 import gdown
 import requests
-import json
 
 # ----------------------------
 # 1. Model setup
@@ -97,53 +96,41 @@ def get_llm_commentary(defects_info, api_key):
     Keep the response concise and professional (under 200 words).
     """
     
-    # Try multiple endpoints - some might work better than others
-    endpoints = [
-        {
-            "url": "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
-            "params": {"max_new_tokens": 300, "temperature": 0.3}
-        },
-        {
-            "url": "https://api-inference.huggingface.co/models/google/flan-t5-base",
-            "params": {"max_new_tokens": 300, "temperature": 0.3}
-        },
-        {
-            "url": "https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill",
-            "params": {"max_new_tokens": 300, "temperature": 0.3}
-        }
-    ]
-    
+    # Use a reliable model that's more likely to be available
+    API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
     headers = {"Authorization": f"Bearer {api_key}"}
     
-    for endpoint in endpoints:
-        try:
-            with st.spinner(f"Trying endpoint: {endpoint['url'].split('/')[-1]}..."):
-                payload = {
-                    "inputs": prompt,
-                    "parameters": endpoint["params"]
-                }
-                
-                response = requests.post(endpoint["url"], headers=headers, json=payload, timeout=30)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    if isinstance(result, list) and len(result) > 0:
-                        generated_text = result[0].get('generated_text', '')
-                        if generated_text:
-                            return generated_text
-                    elif isinstance(result, dict):
-                        generated_text = result.get('generated_text', '')
-                        if generated_text:
-                            return generated_text
-                elif response.status_code == 503:
-                    # Model is loading, try the next one
-                    continue
-                    
-        except Exception as e:
-            # Try the next endpoint if this one fails
-            continue
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 300,
+            "temperature": 0.3,
+        }
+    }
     
-    return "All AI endpoints are currently unavailable. Using local expert analysis instead."
+    try:
+        with st.spinner("Getting expert analysis from AI..."):
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    return result[0].get('generated_text', 'No analysis generated')
+                elif isinstance(result, dict):
+                    return result.get('generated_text', 'No analysis generated')
+                else:
+                    return "Received unexpected response format from AI service."
+            elif response.status_code == 503:
+                return "The AI model is currently loading. Please try again in a few moments."
+            else:
+                return f"API Error: Status code {response.status_code}"
+                
+    except requests.exceptions.Timeout:
+        return "The AI analysis is taking too long. Please try again later."
+    except requests.exceptions.ConnectionError:
+        return "Connection error. Please check your internet connection."
+    except Exception as e:
+        return f"Unable to generate AI commentary: {str(e)}"
 
 # ----------------------------
 # 4. Local Expert System (Fallback)
@@ -168,11 +155,7 @@ def get_local_expert_commentary(defects):
     for defect_type, count in defect_counts.items():
         commentary += f"- {count} {defect_type}(s)\n"
     
-    # Calculate average confidence
-    avg_confidence = sum(d['confidence'] for d in defects) / len(defects)
-    commentary += f"\n**Average Detection Confidence**: {avg_confidence:.2f}\n\n"
-    
-    commentary += "**General Recommendations**:\n"
+    commentary += "\n**General Recommendations**:\n"
     
     if any('crack' in d['type'].lower() for d in defects):
         commentary += "- Cracks should be monitored for width progression over time\n"
@@ -217,13 +200,8 @@ if api_key:
 else:
     st.sidebar.info("Enter your Hugging Face API key to enable AI commentary")
 
-# Debug information
-with st.sidebar.expander("Debug Info"):
-    st.write("If API is not working, possible reasons:")
-    st.write("- Model may be loading (try again in 30 seconds)")
-    st.write("- API rate limits may be exceeded")
-    st.write("- Temporary service outage")
-    st.write("The app will automatically use local expert analysis if API fails.")
+# Model selection
+use_ai = st.sidebar.checkbox("Use AI Commentary", value=True if api_key else False)
 
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
@@ -270,17 +248,15 @@ if uploaded_file is not None:
         # Get and display commentary
         st.subheader("🧠 Expert Analysis")
         
-        if api_key:
-            # Try AI first, fallback to local if it fails
+        if use_ai and api_key:
             commentary = get_llm_commentary(defects_info, api_key)
-            if "unavailable" in commentary.lower():
-                st.info("AI service temporarily unavailable. Using local expert analysis.")
-                commentary = get_local_expert_commentary(defects)
             st.write(commentary)
+            st.info("This analysis was generated using AI. For critical decisions, consult a structural engineer.")
         else:
             commentary = get_local_expert_commentary(defects)
             st.write(commentary)
-            st.info("To enable AI-powered analysis, add your Hugging Face API key in the sidebar")
+            if not api_key:
+                st.info("To enable AI-powered analysis, add your Hugging Face API key in the sidebar")
         
     else:
         st.success("✅ No defects detected! The concrete surface appears to be in good condition.")
@@ -294,3 +270,17 @@ st.markdown("""
 - Local expert system provides fallback analysis when AI is unavailable
 - Always consult a qualified engineer for critical structural assessments
 """)
+
+# Troubleshooting section
+with st.expander("Troubleshooting"):
+    st.write("""
+    **Common API Issues**:
+    1. **Invalid API Key**: Make sure you've copied the key correctly from Hugging Face
+    2. **Model Unavailable**: Some models may be temporarily offline
+    3. **Rate Limiting**: Free accounts have limited API calls
+    
+    **If AI commentary isn't working**:
+    - The local expert system will still provide detailed analysis
+    - You can use the app without an API key
+    - Check the Hugging Face status page for API issues
+    """)
