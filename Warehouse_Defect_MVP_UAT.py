@@ -32,79 +32,77 @@ def load_yolo_model(model_path):
     return YOLO(model_path)
 
 model = load_yolo_model(model_file)
-
 # ----------------------------
-# 2. Public AI Model Integration (Updated)
+# 2. Public AI Model Integration (Safe & Reliable)
 # ----------------------------
 import time
+import requests
+import json
+import streamlit as st
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-def get_llm_commentary(defects_info):
+# Optional local DialoGPT setup
+def load_local_dialoGPT():
+    model_name = "microsoft/DialoGPT-small"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    return tokenizer, model
+
+def run_local_dialoGPT(tokenizer, model, prompt, max_new_tokens=200):
+    inputs = tokenizer.encode(prompt + tokenizer.eos_token, return_tensors="pt")
+    outputs = model.generate(inputs, max_new_tokens=max_new_tokens, pad_token_id=tokenizer.eos_token_id)
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+def get_llm_commentary(defects_info, use_local_dialoGPT=False):
     """
-    Get AI commentary using Hugging Face Inference API models.
-    Retries models if loading or rate limited, and parses responses.
+    Get AI commentary using Hugging Face Inference API (flan-t5-base)
+    or local DialoGPT-small if specified.
     """
     prompt = f"""
     As a structural engineering expert, analyze these concrete defects detected in a warehouse:
     {defects_info}
     
-    Please provide:
-    1. A brief assessment of the severity
-    2. Potential causes
-    3. Recommended actions
-    4. Safety implications
-    
-    Keep the response concise and professional (under 200 words).
+    Provide a concise assessment, causes, recommendations, and safety implications.
     """
-    
+
     HF_TOKEN = st.secrets.get("HUGGINGFACEHUB_API_TOKEN")
     if not HF_TOKEN:
-        st.warning("Hugging Face API token not found in Streamlit secrets. AI models will not work.")
+        st.warning("Hugging Face API token not found. AI analysis will not run.")
         return None
 
     endpoints = [
         {
-            "name": "Hugging Face Inference API (Free)",
+            "name": "Hugging Face Inference API (flan-t5-base)",
             "url": "https://api-inference.huggingface.co/models/google/flan-t5-base",
             "headers": {"Authorization": f"Bearer {HF_TOKEN}"},
             "payload": {"inputs": prompt, "parameters": {"max_new_tokens": 200, "temperature": 0.7}}
-        },
-        {
-            "name": "Hugging Face Inference API (Alternative)",
-            "url": "https://api-inference.huggingface.co/models/microsoft/DialoGPT-small",
-            "headers": {"Authorization": f"Bearer {HF_TOKEN}"},
-            "payload": {"inputs": prompt, "parameters": {"max_new_tokens": 300, "temperature": 0.7}}
         }
     ]
-    
+
+    # Try Inference API first
     for endpoint in endpoints:
         try:
             with st.spinner(f"Trying {endpoint['name']}..."):
-                for attempt in range(3):  # Retry up to 3 times if model loading or rate limited
+                for attempt in range(3):
                     response = requests.post(
                         endpoint["url"],
                         headers=endpoint["headers"],
                         json=endpoint["payload"],
                         timeout=20
                     )
-                    
+
                     if response.status_code == 200:
                         result = response.json()
-                        # Parse different response formats
                         if isinstance(result, list) and len(result) > 0:
                             if isinstance(result[0], dict) and 'generated_text' in result[0]:
                                 return result[0]['generated_text']
                             elif isinstance(result[0], str):
                                 return result[0]
-                        elif isinstance(result, dict):
-                            if 'generated_text' in result:
-                                return result['generated_text']
-                            elif 'data' in result and isinstance(result['data'], list) and len(result['data']) > 0:
-                                return result['data'][0]
-                        # If unrecognized format, return raw JSON for debugging
+                        elif isinstance(result, dict) and 'generated_text' in result:
+                            return result['generated_text']
                         return json.dumps(result, indent=2)
-                    
+
                     elif response.status_code in [503, 429]:
-                        # Model loading or rate limited, wait and retry
                         time.sleep(5)
                         continue
                     else:
@@ -112,8 +110,13 @@ def get_llm_commentary(defects_info):
                         break
         except Exception as e:
             st.warning(f"{endpoint['name']} failed: {e}")
-    
-    # If all endpoints fail, return None
+
+    # Fallback to local DialoGPT-small if requested
+    if use_local_dialoGPT:
+        st.info("Using local DialoGPT-small model as fallback...")
+        tokenizer, model = load_local_dialoGPT()
+        return run_local_dialoGPT(tokenizer, model, prompt)
+
     return None
 
 
