@@ -2,8 +2,6 @@ streamlit
 ultralytics
 torch
 Pillow
+opencv-python-headless
 pandas
 requests
-gdown
-transformers
-
