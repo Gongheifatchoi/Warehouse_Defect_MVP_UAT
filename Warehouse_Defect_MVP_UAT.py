@@ -3,17 +3,15 @@ import streamlit as st
 from PIL import Image
 from ultralytics import YOLO
 import gdown
+import io
 
 # ----------------------------
-# 模型路径与 Google Drive 链接
+# Model setup
 # ----------------------------
 MODEL_PATH = "best.pt"
-#MODEL_ID = "你的文件ID"  # 替换为你的 Google Drive 文件ID
-MODEL_URL = f"https://github.com/Gongheifatchoi/Warehouse_Defect_MVP_UAT/blob/main/best.pt"
+MODEL_ID = "你的文件ID"  # Replace with your Google Drive file ID
+MODEL_URL = f"https://drive.google.com/uc?id={MODEL_ID}"
 
-# ----------------------------
-# 下载模型
-# ----------------------------
 @st.cache_data(show_spinner=False)
 def download_model(url=MODEL_URL, path=MODEL_PATH):
     if not os.path.exists(path):
@@ -24,9 +22,6 @@ def download_model(url=MODEL_URL, path=MODEL_PATH):
 
 model_file = download_model()
 
-# ----------------------------
-# 加载模型
-# ----------------------------
 @st.cache_resource(show_spinner=False)
 def load_model(path):
     return YOLO(path)
@@ -34,41 +29,64 @@ def load_model(path):
 model = load_model(model_file)
 
 # ----------------------------
-# Streamlit 用户界面
+# Streamlit UI
 # ----------------------------
 st.title("Warehouse Concrete Defect Detection")
-st.write("Upload an image of concrete surfaces to detect defects.")
+st.write("Upload one or more images of concrete surfaces to detect defects and get AI commentary.")
 
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg","jpeg","png"])
+uploaded_files = st.file_uploader(
+    "Choose image(s)...", type=["jpg","jpeg","png"], accept_multiple_files=True
+)
 
-if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Image", use_column_width=True)
-
-    # 推理
-    results = model(image)
-
-    # 标注图片
-    annotated_image = results[0].plot()
-    st.image(annotated_image, caption="Prediction Result", use_column_width=True)
-
-    # 输出预测信息
+def generate_commentary(results):
+    """
+    Simple commentary based on detection/classification results.
+    """
     if model.task == "classify":
-        # 分类模型
         if hasattr(results[0], 'probs'):
-            probs = results[0].probs.tolist()
-            class_name = results[0].names[int(results[0].probs.argmax())]
-            st.write(f"Predicted Class: {class_name}")
-            st.write("Class Probabilities:", probs)
+            class_id = int(results[0].probs.argmax())
+            class_name = results[0].names[class_id]
+            confidence = float(results[0].probs[class_id]) * 100
+            comment = f"The image is classified as '{class_name}' with {confidence:.2f}% confidence."
+            if class_name.lower() == "defect":
+                comment += " Attention: Potential concrete defects detected. Consider inspection."
+            else:
+                comment += " No major defects detected."
         else:
-            st.write("No classification probabilities available.")
+            comment = "Classification probabilities not available."
     elif model.task == "detect":
-        # 检测模型
-        if hasattr(results[0], 'boxes') and len(results[0].boxes) > 0:
-            st.write("Detected objects:")
-            for box in results[0].boxes:
-                cls_id = int(box.cls[0])
-                conf = float(box.conf[0])
-                st.write(f"- Class: {results[0].names[cls_id]}, Confidence: {conf:.2f}")
+        boxes = results[0].boxes
+        if hasattr(results[0], 'boxes') and len(boxes) > 0:
+            comment = f"{len(boxes)} potential defect(s) detected. Please inspect areas highlighted in the annotated image."
         else:
-            st.write("No objects detected.")
+            comment = "No defects detected. The concrete surface appears normal."
+    else:
+        comment = "No commentary available for this model task."
+    return comment
+
+if uploaded_files:
+    for uploaded_file in uploaded_files:
+        image = Image.open(uploaded_file)
+        st.image(image, caption=f"Uploaded: {uploaded_file.name}", use_column_width=True)
+
+        # Run inference
+        results = model(image)
+
+        # Annotated image
+        annotated_image = results[0].plot()
+        st.image(annotated_image, caption="Prediction Result", use_column_width=True)
+
+        # Download button
+        buf = io.BytesIO()
+        annotated_image.save(buf, format="PNG")
+        st.download_button(
+            label="Download Annotated Image",
+            data=buf.getvalue(),
+            file_name=f"annotated_{uploaded_file.name}",
+            mime="image/png"
+        )
+
+        # AI commentary
+        commentary = generate_commentary(results)
+        st.subheader("AI Commentary")
+        st.write(commentary)
