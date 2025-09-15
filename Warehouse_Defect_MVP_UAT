@@ -8,8 +8,8 @@ import gdown
 # 模型路径与 Google Drive 链接
 # ----------------------------
 MODEL_PATH = "best.pt"
-MODEL_ID = "你的文件ID"  # 替换为你的 Google Drive 文件ID
-MODEL_URL = f"https://drive.google.com/uc?id={MODEL_ID}"
+#MODEL_ID = "你的文件ID"  # 替换为你的 Google Drive 文件ID
+MODEL_URL = f"https://github.com/Gongheifatchoi/Warehouse_Defect_MVP_UAT/blob/main/best.pt"
 
 # ----------------------------
 # 下载模型
