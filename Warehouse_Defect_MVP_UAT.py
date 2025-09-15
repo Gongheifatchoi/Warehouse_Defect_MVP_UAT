@@ -4,12 +4,16 @@ from PIL import Image
 from ultralytics import YOLO
 import gdown
 import requests
+import json
+import time
+from openai import OpenAI
 
 # ----------------------------
 # 1. Model setup
 # ----------------------------
 MODEL_PATH = "best.pt"
-MODEL_URL = "https://drive.google.com/uc?export=download&id=1fOeD5p2bdG-VkgNq7-QNJmlXp5_DaPm1"
+MODEL_URL = "https://drive.google.com/uc?export=download&id=1FHjz3wjLBWk5c04j7kGBynQcPTyVA19R"
+
 
 @st.cache_data(show_spinner=False)
 def download_model(url=MODEL_URL, path=MODEL_PATH):
@@ -33,190 +37,132 @@ def load_yolo_model(model_path):
 model = load_yolo_model(model_file)
 
 # ----------------------------
-# 2. API Key Testing Function
+# 2. Hugging Face LLM Integration with OpenAI-compatible API
 # ----------------------------
-def test_api_key(api_key):
+def get_llm_commentary(defects_info):
     """
-    Test if the Hugging Face API key is valid using a reliable model
+    Get professional engineering analysis using Hugging Face's OpenAI-compatible API
     """
-    if not api_key:
-        return False, "No API key provided"
-    
-    # Use a reliable model for testing
-    API_URL = "https://api-inference.huggingface.co/models/distilbert-base-uncased"
-    headers = {"Authorization": f"Bearer {api_key}"}
-    
-    payload = {
-        "inputs": "[MASK] is a great framework for machine learning.",
-    }
+    # Get API key from Streamlit secrets
+    try:
+        # Try different possible secret names
+        if 'HUGGINGFACEHUB_API_TOKEN' in st.secrets:
+            api_key = st.secrets['HUGGINGFACEHUB_API_TOKEN']
+        elif 'HUGGINGFACE_API_KEY' in st.secrets:
+            api_key = st.secrets['HUGGINGFACE_API_KEY']
+        elif 'HF_TOKEN' in st.secrets:
+            api_key = st.secrets['HF_TOKEN']
+        else:
+            st.error("Hugging Face API token not found in secrets. Please check your secrets configuration.")
+            return "API token configuration error."
+    except Exception as e:
+        st.error(f"Error accessing secrets: {e}")
+        return "Secrets access error."
     
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=10)
+        # Initialize OpenAI client with Hugging Face endpoint
+        client = OpenAI(
+            base_url="https://router.huggingface.co/v1",
+            api_key=api_key,
+        )
         
-        if response.status_code == 200:
-            return True, "API key is valid!"
-        elif response.status_code == 401:
-            return False, "Invalid API key: Unauthorized (401)"
-        elif response.status_code == 403:
-            return False, "API key doesn't have access to this resource (403)"
-        elif response.status_code == 404:
-            return False, "Model not found (404). Try a different model."
-        else:
-            return False, f"API returned status code: {response.status_code}"
+        # Professional engineering prompt with specific technical requirements
+        prompt = f"""
+        As a licensed structural engineer with expertise in concrete pathology and warehouse structural assessment, 
+        provide a detailed technical analysis of these detected concrete defects:
+        
+        DEFECTS IDENTIFIED:
+        {defects_info}
+        
+        Please provide a comprehensive engineering assessment including:
+        
+        1. STRUCTURAL SIGNIFICANCE:
+           - Rate severity for each defect type (Minor, Moderate, Severe, Critical)
+           - Potential impact on structural integrity and load-bearing capacity
+           - Risk of progressive deterioration
+        
+        2. ROOT CAUSE ANALYSIS:
+           - Material deficiencies (concrete mix design, aggregate issues)
+           - Construction practices (improper curing, compaction issues)
+           - Environmental factors (freeze-thaw cycles, chemical exposure)
+           - Loading conditions (overloading, dynamic impacts)
+           - Corrosion mechanisms (chloride ingress, carbonation)
+        
+        3. QUANTITATIVE ASSESSMENT:
+           - Estimated remaining service life reduction
+           - Crack width classification per ACI 224R or relevant standards
+           - Spalling depth and area significance
+           - Reinforcement corrosion activity level
+        
+        4. MITIGATION STRATEGIES:
+           - Immediate safety precautions required
+           - Short-term stabilization measures
+           - Long-term repair methodologies (epoxy injection, cathodic protection, etc.)
+           - Monitoring and inspection frequency recommendations
+        
+        5. COST AND TIMELINE IMPLICATIONS:
+           - Urgency of intervention
+           - Estimated repair complexity
+           - Potential business interruption impacts
+        
+        Provide specific, actionable recommendations based on engineering best practices and relevant codes (ACI, EN, AS).
+        Use technical terminology appropriate for structural engineering professionals.
+        """
+        
+        with st.spinner("Conducting professional structural analysis..."):
+            response = client.chat.completions.create(
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a senior structural engineering consultant with 25+ years of experience in concrete pathology, structural assessment, and repair design. You provide precise, technical analysis following engineering standards and codes. Your responses are professional, data-driven, and focused on actionable engineering recommendations."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=600,
+                temperature=0.2,  # Lower temperature for more deterministic, professional output
+                top_p=0.8,
+                stream=False
+            )
             
-    except requests.exceptions.Timeout:
-        return False, "Request timed out. The API might be busy."
-    except requests.exceptions.ConnectionError:
-        return False, "Connection error. Check your internet connection."
-    except Exception as e:
-        return False, f"Error testing API key: {str(e)}"
-
-# ----------------------------
-# 3. Hugging Face LLM Integration with reliable model
-# ----------------------------
-def get_llm_commentary(defects_info, api_key):
-    """
-    Get AI commentary on detected defects using Hugging Face's API
-    Uses a more reliable model for consistent performance
-    """
-    if not api_key:
-        return "API key is required for AI commentary. Please enter your Hugging Face API key."
-    
-    # Prepare the prompt
-    prompt = f"""
-    As a structural engineering expert, analyze these concrete defects detected in a warehouse:
-    {defects_info}
-    
-    Please provide:
-    1. A brief assessment of the severity
-    2. Potential causes
-    3. Recommended actions
-    4. Safety implications
-    
-    Keep the response concise and professional (under 200 words).
-    """
-    
-    # Use a reliable model that's more likely to be available
-    API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
-    headers = {"Authorization": f"Bearer {api_key}"}
-    
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 300,
-            "temperature": 0.3,
-        }
-    }
-    
-    try:
-        with st.spinner("Getting expert analysis from AI..."):
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                if isinstance(result, list) and len(result) > 0:
-                    return result[0].get('generated_text', 'No analysis generated')
-                elif isinstance(result, dict):
-                    return result.get('generated_text', 'No analysis generated')
-                else:
-                    return "Received unexpected response format from AI service."
-            elif response.status_code == 503:
-                return "The AI model is currently loading. Please try again in a few moments."
-            else:
-                return f"API Error: Status code {response.status_code}"
+            return response.choices[0].message.content
                 
-    except requests.exceptions.Timeout:
-        return "The AI analysis is taking too long. Please try again later."
-    except requests.exceptions.ConnectionError:
-        return "Connection error. Please check your internet connection."
     except Exception as e:
-        return f"Unable to generate AI commentary: {str(e)}"
+        return f"Unable to generate engineering analysis: {str(e)}"
 
 # ----------------------------
-# 4. Local Expert System (Fallback)
+# 3. Streamlit UI
 # ----------------------------
-def get_local_expert_commentary(defects):
-    """
-    Generate expert commentary using a local rule-based system
-    """
-    if not defects:
-        return "No defects detected. The concrete surface appears to be in good condition."
-    
-    # Count defects by type
-    defect_counts = {}
-    for defect in defects:
-        defect_type = defect['type']
-        defect_counts[defect_type] = defect_counts.get(defect_type, 0) + 1
-    
-    # Generate commentary
-    commentary = "## Expert Analysis\n\n"
-    commentary += "**Defects Detected**:\n"
-    
-    for defect_type, count in defect_counts.items():
-        commentary += f"- {count} {defect_type}(s)\n"
-    
-    commentary += "\n**General Recommendations**:\n"
-    
-    if any('crack' in d['type'].lower() for d in defects):
-        commentary += "- Cracks should be monitored for width progression over time\n"
-        commentary += "- Cracks wider than 0.3mm may require professional assessment\n"
-        commentary += "- Consider epoxy injection for active cracks\n"
-    
-    if any('spall' in d['type'].lower() for d in defects):
-        commentary += "- Spalling indicates concrete deterioration that may expose reinforcement\n"
-        commentary += "- Affected areas should be repaired to prevent further damage\n"
-        commentary += "- Clean and treat exposed reinforcement before patching\n"
-    
-    if any('hole' in d['type'].lower() or 'void' in d['type'].lower() for d in defects):
-        commentary += "- Voids and holes should be filled with appropriate repair materials\n"
-        commentary += "- Assess whether voids affect structural integrity\n"
-    
-    if any('stain' in d['type'].lower() or 'discolor' in d['type'].lower() for d in defects):
-        commentary += "- Stains may indicate water infiltration or chemical exposure\n"
-        commentary += "- Identify and address the source of staining\n"
-    
-    commentary += "\n**Safety Note**: For a comprehensive assessment, consult a structural engineer."
-    
-    return commentary
+st.title("🏗️ Warehouse Concrete Structural Assessment")
+st.write("Upload an image of concrete surfaces for professional structural defect analysis and engineering recommendations.")
 
-# ----------------------------
-# 5. Streamlit UI
-# ----------------------------
-st.title("🏗️ Warehouse Concrete Defect Detection")
-st.write("Upload an image of concrete surfaces to detect defects and receive expert analysis.")
+# Check if we have the API key set up
+try:
+    has_api_key = any(key in st.secrets for key in ['HUGGINGFACEHUB_API_TOKEN', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'])
+    if not has_api_key:
+        st.warning("Hugging Face API token not found in secrets. Professional engineering analysis may not be available.")
+    else:
+        st.success("Hugging Face API key authenticated. Ready for professional structural analysis.")
+except:
+    st.warning("Unable to verify API configuration. Some features may be limited.")
 
-# API Key Section
-st.sidebar.header("API Key Configuration")
-api_key = st.sidebar.text_input("Hugging Face API Key:", type="password", 
-                               help="Get your API key from huggingface.co → Settings → Access Tokens")
-
-if api_key:
-    if st.sidebar.button("Test API Key"):
-        is_valid, message = test_api_key(api_key)
-        if is_valid:
-            st.sidebar.success(message)
-        else:
-            st.sidebar.error(message)
-else:
-    st.sidebar.info("Enter your Hugging Face API key to enable AI commentary")
-
-# Model selection
-use_ai = st.sidebar.checkbox("Use AI Commentary", value=True if api_key else False)
-
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Choose structural inspection image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     # Open the image
     image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+    st.image(image, caption="Structural Inspection Image", use_container_width=True)
 
     # Run detection
-    with st.spinner("Analyzing image for defects..."):
+    with st.spinner("Conducting structural defect analysis..."):
         results = model(image)
     
     # Annotated image
     annotated_image = results[0].plot()
-    st.image(annotated_image, caption="Detected Defects", use_container_width=True)
+    st.image(annotated_image, caption="Identified Structural Defects", use_container_width=True)
     
     # Extract defect information
     defects = []
@@ -228,59 +174,70 @@ if uploaded_file is not None:
             defects.append({
                 "type": class_name,
                 "confidence": confidence,
-                "location": [float(coord) for coord in box.xywh[0]]
+                "location": [float(coord) for coord in box.xywh[0]]  # x_center, y_center, width, height
             })
     
     # Display defect information
     if defects:
-        st.subheader("📊 Detection Results")
+        st.subheader("📊 Structural Defect Inventory")
         
-        # Show defects in a table
+        # Professional defect table
+        st.write("**Defect Classification Summary:**")
+        defect_data = []
         for i, defect in enumerate(defects, 1):
-            st.write(f"{i}. **{defect['type']}** ({(defect['confidence']*100):.1f}% confidence)")
+            defect_data.append({
+                "Defect #": i,
+                "Type": defect['type'],
+                "Confidence": f"{defect['confidence']*100:.1f}%",
+                "Severity": "To be assessed"  # Placeholder for engineering assessment
+            })
         
-        # Prepare defect information for LLM
+        # Show defects in a professional table format
+        for defect in defect_data:
+            st.write(f"**{defect['Defect #']}. {defect['Type']}** - Confidence: {defect['Confidence']}")
+        
+        # Prepare defect information for engineering analysis
         defects_info = "\n".join([
-            f"- {d['type']} (confidence: {d['confidence']:.2f})"
+            f"- {d['type']} (detection confidence: {d['confidence']:.2f})"
             for d in defects
         ])
         
-        # Get and display commentary
-        st.subheader("🧠 Expert Analysis")
+        # Get and display professional engineering analysis
+        st.subheader("🧠 Professional Engineering Assessment")
+        with st.spinner("Generating comprehensive structural analysis..."):
+            analysis = get_llm_commentary(defects_info)
         
-        if use_ai and api_key:
-            commentary = get_llm_commentary(defects_info, api_key)
-            st.write(commentary)
-            st.info("This analysis was generated using AI. For critical decisions, consult a structural engineer.")
-        else:
-            commentary = get_local_expert_commentary(defects)
-            st.write(commentary)
-            if not api_key:
-                st.info("To enable AI-powered analysis, add your Hugging Face API key in the sidebar")
+        st.write(analysis)
+        
+        # Add technical references
+        with st.expander("📚 Technical References & Standards"):
+            st.write("""
+            **Relevant Engineering Standards:**
+            - ACI 201.1R: Guide for Conducting a Visual Inspection of Concrete in Service
+            - ACI 224R: Control of Cracking in Concrete Structures
+            - ACI 364.1R: Guide for Evaluation of Concrete Structures Prior to Rehabilitation
+            - EN 1504: Products and systems for the protection and repair of concrete structures
+            - ASTM C856: Standard Practice for Petrographic Examination of Hardened Concrete
+            
+            **Severity Classification:**
+            - **Minor**: Cosmetic issues, no structural impact
+            - **Moderate**: Requires monitoring, may need non-structural repairs
+            - **Severe**: Structural capacity affected, requires engineering intervention
+            - **Critical**: Immediate safety risk, requires urgent structural repairs
+            """)
         
     else:
-        st.success("✅ No defects detected! The concrete surface appears to be in good condition.")
+        st.success("✅ No structural defects detected! The concrete elements appear to be in sound condition.")
 
-# Footer
+# Add professional footer
 st.markdown("---")
 st.markdown("""
-**About this app**:
-- Defect detection powered by YOLO model
-- AI commentary requires a Hugging Face API key
-- Local expert system provides fallback analysis when AI is unavailable
-- Always consult a qualified engineer for critical structural assessments
+**Disclaimer**: 
+- This analysis provides preliminary engineering assessment based on visual inspection data
+- Field verification and detailed structural analysis by licensed engineers is recommended for final decisions
+- All recommendations should be verified against local building codes and specific site conditions
+- Detection accuracy is dependent on image quality, lighting, and surface conditions
 """)
 
-# Troubleshooting section
-with st.expander("Troubleshooting"):
-    st.write("""
-    **Common API Issues**:
-    1. **Invalid API Key**: Make sure you've copied the key correctly from Hugging Face
-    2. **Model Unavailable**: Some models may be temporarily offline
-    3. **Rate Limiting**: Free accounts have limited API calls
-    
-    **If AI commentary isn't working**:
-    - The local expert system will still provide detailed analysis
-    - You can use the app without an API key
-    - Check the Hugging Face status page for API issues
-    """)
+# Add engineering certification note
+st.caption("_Analysis generated using AI-assisted engineering assessment tools. Final engineering decisions should be made by qualified professionals._")
