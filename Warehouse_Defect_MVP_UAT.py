@@ -37,20 +37,17 @@ model = load_yolo_model(model_file)
 # ----------------------------
 def test_api_key(api_key):
     """
-    Test if the Hugging Face API key is valid
+    Test if the Hugging Face API key is valid using a reliable model
     """
     if not api_key:
         return False, "No API key provided"
     
-    # Test with a simple model that should be accessible
-    API_URL = "https://api-inference.huggingface.co/models/google/flan-t5-base"
+    # Use a reliable model for testing
+    API_URL = "https://api-inference.huggingface.co/models/distilbert-base-uncased"
     headers = {"Authorization": f"Bearer {api_key}"}
     
     payload = {
-        "inputs": "Hello, how are you?",
-        "parameters": {
-            "max_new_tokens": 10,
-        }
+        "inputs": "[MASK] is a great framework for machine learning.",
     }
     
     try:
@@ -75,11 +72,12 @@ def test_api_key(api_key):
         return False, f"Error testing API key: {str(e)}"
 
 # ----------------------------
-# 3. Hugging Face LLM Integration
+# 3. Hugging Face LLM Integration with reliable model
 # ----------------------------
 def get_llm_commentary(defects_info, api_key):
     """
     Get AI commentary on detected defects using Hugging Face's API
+    Uses a more reliable model for consistent performance
     """
     if not api_key:
         return "API key is required for AI commentary. Please enter your Hugging Face API key."
@@ -98,44 +96,41 @@ def get_llm_commentary(defects_info, api_key):
     Keep the response concise and professional (under 200 words).
     """
     
-    # Try multiple models in case one is unavailable
-    models_to_try = [
-        "google/flan-t5-large",
-        "google/flan-t5-base",
-        "microsoft/DialoGPT-medium"
-    ]
+    # Use a reliable model that's more likely to be available
+    API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
+    headers = {"Authorization": f"Bearer {api_key}"}
     
-    for model_name in models_to_try:
-        API_URL = f"https://api-inference.huggingface.co/models/{model_name}"
-        headers = {"Authorization": f"Bearer {api_key}"}
-        
-        payload = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": 300,
-                "temperature": 0.3,
-            }
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 300,
+            "temperature": 0.3,
         }
-        
-        try:
-            with st.spinner(f"Getting expert analysis using {model_name}..."):
-                response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    if isinstance(result, list) and len(result) > 0:
-                        return result[0].get('generated_text', 'No analysis generated')
-                    elif isinstance(result, dict):
-                        return result.get('generated_text', 'No analysis generated')
-                elif response.status_code == 503:
-                    # Model is loading, try the next one
-                    continue
-                    
-        except Exception as e:
-            # Try the next model if this one fails
-            continue
+    }
     
-    return "All AI models are currently unavailable. Please try again later or check your API key."
+    try:
+        with st.spinner("Getting expert analysis from AI..."):
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0:
+                    return result[0].get('generated_text', 'No analysis generated')
+                elif isinstance(result, dict):
+                    return result.get('generated_text', 'No analysis generated')
+                else:
+                    return "Received unexpected response format from AI service."
+            elif response.status_code == 503:
+                return "The AI model is currently loading. Please try again in a few moments."
+            else:
+                return f"API Error: Status code {response.status_code}"
+                
+    except requests.exceptions.Timeout:
+        return "The AI analysis is taking too long. Please try again later."
+    except requests.exceptions.ConnectionError:
+        return "Connection error. Please check your internet connection."
+    except Exception as e:
+        return f"Unable to generate AI commentary: {str(e)}"
 
 # ----------------------------
 # 4. Local Expert System (Fallback)
@@ -154,7 +149,7 @@ def get_local_expert_commentary(defects):
         defect_counts[defect_type] = defect_counts.get(defect_type, 0) + 1
     
     # Generate commentary
-    commentary = "## Expert Analysis (Local System)\n\n"
+    commentary = "## Expert Analysis\n\n"
     commentary += "**Defects Detected**:\n"
     
     for defect_type, count in defect_counts.items():
@@ -165,13 +160,20 @@ def get_local_expert_commentary(defects):
     if any('crack' in d['type'].lower() for d in defects):
         commentary += "- Cracks should be monitored for width progression over time\n"
         commentary += "- Cracks wider than 0.3mm may require professional assessment\n"
+        commentary += "- Consider epoxy injection for active cracks\n"
     
     if any('spall' in d['type'].lower() for d in defects):
         commentary += "- Spalling indicates concrete deterioration that may expose reinforcement\n"
         commentary += "- Affected areas should be repaired to prevent further damage\n"
+        commentary += "- Clean and treat exposed reinforcement before patching\n"
     
     if any('hole' in d['type'].lower() or 'void' in d['type'].lower() for d in defects):
         commentary += "- Voids and holes should be filled with appropriate repair materials\n"
+        commentary += "- Assess whether voids affect structural integrity\n"
+    
+    if any('stain' in d['type'].lower() or 'discolor' in d['type'].lower() for d in defects):
+        commentary += "- Stains may indicate water infiltration or chemical exposure\n"
+        commentary += "- Identify and address the source of staining\n"
     
     commentary += "\n**Safety Note**: For a comprehensive assessment, consult a structural engineer."
     
@@ -185,7 +187,8 @@ st.write("Upload an image of concrete surfaces to detect defects and receive exp
 
 # API Key Section
 st.sidebar.header("API Key Configuration")
-api_key = st.sidebar.text_input("Hugging Face API Key:", type="password", help="Get your API key from huggingface.co")
+api_key = st.sidebar.text_input("Hugging Face API Key:", type="password", 
+                               help="Get your API key from huggingface.co → Settings → Access Tokens")
 
 if api_key:
     if st.sidebar.button("Test API Key"):
@@ -267,3 +270,17 @@ st.markdown("""
 - Local expert system provides fallback analysis when AI is unavailable
 - Always consult a qualified engineer for critical structural assessments
 """)
+
+# Troubleshooting section
+with st.expander("Troubleshooting"):
+    st.write("""
+    **Common API Issues**:
+    1. **Invalid API Key**: Make sure you've copied the key correctly from Hugging Face
+    2. **Model Unavailable**: Some models may be temporarily offline
+    3. **Rate Limiting**: Free accounts have limited API calls
+    
+    **If AI commentary isn't working**:
+    - The local expert system will still provide detailed analysis
+    - You can use the app without an API key
+    - Check the Hugging Face status page for API issues
+    """)
