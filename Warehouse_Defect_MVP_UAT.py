@@ -5,14 +5,14 @@ from ultralytics import YOLO
 import gdown
 
 # ----------------------------
-# Model setup
+# 模型路径与 Google Drive 链接
 # ----------------------------
 MODEL_PATH = "best.pt"
 #MODEL_ID = "你的文件ID"  # 替换为你的 Google Drive 文件ID
 MODEL_URL = f"https://github.com/Gongheifatchoi/Warehouse_Defect_MVP_UAT/blob/main/best.pt"
 
 # ----------------------------
-# Download model if not exists
+# 下载模型
 # ----------------------------
 @st.cache_data(show_spinner=False)
 def download_model(url=MODEL_URL, path=MODEL_PATH):
@@ -25,7 +25,7 @@ def download_model(url=MODEL_URL, path=MODEL_PATH):
 model_file = download_model()
 
 # ----------------------------
-# Load YOLO model
+# 加载模型
 # ----------------------------
 @st.cache_resource(show_spinner=False)
 def load_model(path):
@@ -34,7 +34,7 @@ def load_model(path):
 model = load_model(model_file)
 
 # ----------------------------
-# Streamlit UI
+# Streamlit 用户界面
 # ----------------------------
 st.title("Warehouse Concrete Defect Detection")
 st.write("Upload an image of concrete surfaces to detect defects.")
@@ -45,30 +45,14 @@ if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # Run prediction
+    # 预测
     results = model(image)
 
-    # Annotated image
+    # 标注图片
     annotated_image = results[0].plot()
     st.image(annotated_image, caption="Detected Defects", use_column_width=True)
 
-    # Output detected classes and confidences
+    # 输出类别和置信度
     if hasattr(results[0], 'probs'):
         probs = results[0].probs.tolist()
         st.write("Class Probabilities:", probs)
-    elif hasattr(results[0], 'boxes') and len(results[0].boxes) > 0:
-        preds = [(results[0].names[int(box.cls[0])], float(box.conf[0])) for box in results[0].boxes]
-        st.write("Detected Defects:", preds)
-    else:
-        st.write("No defects detected.")
-
-# ----------------------------
-# Commentary Section (AI)
-# ----------------------------
-st.subheader("AI Commentary")
-st.write(
-    "Based on the image and detected defects, the AI will provide commentary here."
-)
-st.write(
-    "✅ You can integrate OpenAI API or other free NLP tools to auto-generate commentary."
-)
