@@ -56,7 +56,7 @@ def get_llm_commentary(defects_info):
     Keep the response concise and professional (under 200 words).
     """
     
-    HF_TOKEN = st.secrets.get("HUGGINGFACEHUB_API_TOKEN")
+    HF_TOKEN = st.secrets.get("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")
     if not HF_TOKEN:
         st.warning("Hugging Face API token not found in Streamlit secrets. AI models will not work.")
         return None
