@@ -8,6 +8,7 @@ import json
 import time
 from openai import OpenAI
 from datetime import datetime
+import numpy as np
 
 # ----------------------------
 # 1. Model setup
@@ -15,12 +16,10 @@ from datetime import datetime
 MODEL_PATH = "best.pt"
 MODEL_URL = "https://drive.google.com/uc?export=download&id=1FHjz3wjLBWk5c04j7kGBynQcPTyVA19R"
 
-
 @st.cache_data(show_spinner=False)
 def download_model(url=MODEL_URL, path=MODEL_PATH):
     if not os.path.exists(path):
         st.info("Downloading YOLO model, please wait...")
-        # Remove existing file to allow overwrite
         if os.path.exists(path):
             os.remove(path)
         gdown.download(url, path, quiet=False, fuzzy=True)
@@ -38,15 +37,14 @@ def load_yolo_model(model_path):
 model = load_yolo_model(model_file)
 
 # ----------------------------
-# 2. Hugging Face LLM Integration with OpenAI-compatible API
+# 2. Hugging Face LLM Integration
 # ----------------------------
-def get_llm_commentary(defects, inspection_context):
+def get_comparative_analysis(pre_tenancy_defects, during_tenancy_defects, inspection_context):
     """
-    Get professional engineering analysis with pre/post tenancy comparison
+    Get professional comparative analysis between pre-tenancy and during-tenancy conditions
     """
     # Get API key from Streamlit secrets
     try:
-        # Try different possible secret names
         if 'HUGGINGFACEHUB_API_TOKEN' in st.secrets:
             api_key = st.secrets['HUGGINGFACEHUB_API_TOKEN']
         elif 'HUGGINGFACE_API_KEY' in st.secrets:
@@ -54,89 +52,91 @@ def get_llm_commentary(defects, inspection_context):
         elif 'HF_TOKEN' in st.secrets:
             api_key = st.secrets['HF_TOKEN']
         else:
-            st.error("Hugging Face API token not found in secrets. Please check your secrets configuration.")
             return "API token configuration error."
     except Exception as e:
-        st.error(f"Error accessing secrets: {e}")
-        return "Secrets access error."
+        return f"Secrets access error: {e}"
     
     try:
-        # Initialize OpenAI client with Hugging Face endpoint
         client = OpenAI(
             base_url="https://router.huggingface.co/v1",
             api_key=api_key,
         )
         
-        # Prepare detailed defect information
-        defects_info = "DETECTED DEFECT TYPES AND QUANTITIES:\n"
-        defect_counts = {}
-        for defect in defects:
+        # Prepare defect information for both periods
+        pre_info = "PRE-TENANCY DEFECTS:\n"
+        pre_counts = {}
+        for defect in pre_tenancy_defects:
             defect_type = defect['type']
-            defect_counts[defect_type] = defect_counts.get(defect_type, 0) + 1
+            pre_counts[defect_type] = pre_counts.get(defect_type, 0) + 1
         
-        for defect_type, count in defect_counts.items():
-            defects_info += f"- {defect_type}: {count} instance(s)\n"
+        for defect_type, count in pre_counts.items():
+            pre_info += f"- {defect_type}: {count} instance(s)\n"
         
-        defects_info += "\nINDIVIDUAL DEFECT DETAILS:\n"
-        for i, defect in enumerate(defects, 1):
-            defects_info += f"{i}. {defect['type']} (confidence: {defect['confidence']:.2f})\n"
+        during_info = "DURING-TENANCY DEFECTS:\n"
+        during_counts = {}
+        for defect in during_tenancy_defects:
+            defect_type = defect['type']
+            during_counts[defect_type] = during_counts.get(defect_type, 0) + 1
         
-        # Professional engineering prompt with tenancy comparison
+        for defect_type, count in during_counts.items():
+            during_info += f"- {defect_type}: {count} instance(s)\n"
+        
+        # Comparative analysis prompt
         prompt = f"""
-        As a licensed structural engineer and building surveyor, provide a comprehensive analysis of these concrete defects with specific focus on tenancy context:
+        As a licensed structural engineer and building surveyor, provide a comprehensive comparative analysis between pre-tenancy and during-tenancy conditions:
+        
+        {pre_info}
+        
+        {during_info}
         
         INSPECTION CONTEXT: {inspection_context}
         
-        DEFECTS IDENTIFIED:
-        {defects_info}
+        Please provide a detailed comparative analysis including:
         
-        Please provide a detailed analysis including:
+        1. DEFECT PROGRESSION ANALYSIS:
+           - New defects that appeared during tenancy
+           - Existing defects that worsened during tenancy
+           - Defects that remained unchanged
+           - Defects that improved or were repaired
         
-        1. DEFECT-SPECIFIC ANALYSIS:
-           - Precise definition and description of each defect type
-           - Engineering significance and severity rating
-           - Root cause analysis for each defect type
+        2. LIABILITY ASSESSMENT:
+           - Clear determination of landlord vs tenant responsibility for each defect change
+           - Typical timelines for defect development vs tenancy duration
+           - Wear and tear vs actual damage assessment
         
-        2. TENANCY TIMELINE ASSESSMENT:
-           - **Pre-Tenancy vs During Tenancy Comparison**: 
-             * Which defects are likely pre-existing vs tenant-induced?
-             * Typical defect progression timelines for each defect type
-             * Expected vs accelerated deterioration rates
+        3. QUANTITATIVE COMPARISON:
+           - Defect count changes by type
+           - Severity progression analysis
+           - Rate of deterioration assessment
         
-        3. LIABILITY ASSESSMENT:
-           - **Landlord vs Tenant Responsibility**: 
-             * Defects typically considered landlord responsibility
-             * Defects that may be tenant-induced or exacerbated
-             * Maintenance obligation boundaries
+        4. SPECIFIC RECOMMENDATIONS:
+           - Immediate safety concerns
+           - Repair prioritization based on liability
+           - Documentation requirements for dispute resolution
+           - Preventive measures for future
         
-        4. LEGAL AND INSURANCE IMPLICATIONS:
-           - Documentation requirements for tenancy disputes
+        5. COST IMPLICATIONS:
+           - Estimated repair costs by responsibility party
+           - Urgency-based budgeting
            - Insurance claim considerations
-           - Dilapidation schedule implications
         
-        5. DEFECT-SPECIFIC MITIGATION WITH TENANCY CONTEXT:
-           - Urgency of repairs based on tenancy status
-           - Tenant safety considerations
-           - Repair scheduling around tenancy arrangements
-        
-        Please structure your response with clear sections for each defect type and specific tenancy context analysis.
-        Reference relevant building codes, tenancy laws, and maintenance standards.
+        Provide a structured comparison with clear before/after analysis for each defect type.
         """
         
-        with st.spinner("Conducting tenancy context analysis..."):
+        with st.spinner("Generating comprehensive comparative analysis..."):
             response = client.chat.completions.create(
                 model="meta-llama/Meta-Llama-3-8B-Instruct",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a senior structural engineer and building surveyor with expertise in tenancy defect analysis, liability assessment, and building maintenance. You provide detailed analysis comparing pre-tenancy vs during-tenancy conditions, clearly distinguishing landlord vs tenant responsibilities, and offering practical advice for tenancy context."
+                        "content": "You are an expert building surveyor specializing in tenancy defect comparisons. You provide clear, structured comparative analysis between pre-tenancy and during-tenancy conditions, with specific liability assessments and practical recommendations."
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                max_tokens=1200,
+                max_tokens=1500,
                 temperature=0.2,
                 top_p=0.8,
                 stream=False
@@ -145,59 +145,16 @@ def get_llm_commentary(defects, inspection_context):
             return response.choices[0].message.content
                 
     except Exception as e:
-        return f"Unable to generate engineering analysis: {str(e)}"
+        return f"Unable to generate comparative analysis: {str(e)}"
 
 # ----------------------------
-# 3. Streamlit UI with Tenancy Context
+# 3. Helper Functions
 # ----------------------------
-st.title("🏗️ Warehouse Concrete Structural Assessment")
-st.write("Upload an image for detailed defect analysis with pre-tenancy vs during-tenancy comparison.")
-
-# Tenancy context selection
-st.subheader("📋 Inspection Context")
-inspection_context = st.radio(
-    "Select inspection context:",
-    ["Pre-Tenancy (Before Move-In)", "During Tenancy (Occupied)", "Post-Tenancy (Move-Out)"],
-    help="This helps determine liability and appropriate repair strategies"
-)
-
-# Additional tenancy information
-if inspection_context != "Pre-Tenancy (Before Move-In)":
-    tenancy_duration = st.slider("Tenancy Duration (months):", 1, 120, 12)
-    building_usage = st.selectbox(
-        "Building Usage:",
-        ["General Storage", "Light Manufacturing", "Heavy Machinery", "Cold Storage", "Distribution Center", "Other"]
-    )
-else:
-    tenancy_duration = 0
-    building_usage = "Not Applicable"
-
-# Check if we have the API key set up
-try:
-    has_api_key = any(key in st.secrets for key in ['HUGGINGFACEHUB_API_TOKEN', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'])
-    if not has_api_key:
-        st.warning("Hugging Face API token not found in secrets. Professional engineering analysis may not be available.")
-    else:
-        st.success("Hugging Face API key authenticated. Ready for tenancy context analysis.")
-except:
-    st.warning("Unable to verify API configuration. Some features may be limited.")
-
-uploaded_file = st.file_uploader("Choose structural inspection image...", type=["jpg", "jpeg", "png"])
-
-if uploaded_file is not None:
-    # Open the image
-    image = Image.open(uploaded_file)
-    st.image(image, caption=f"Inspection Image - {inspection_context}", use_container_width=True)
-
-    # Run detection
-    with st.spinner("Analyzing concrete defects..."):
+def analyze_image(image, label):
+    """Analyze a single image and return defects"""
+    with st.spinner(f"Analyzing {label} image..."):
         results = model(image)
     
-    # Annotated image
-    annotated_image = results[0].plot()
-    st.image(annotated_image, caption="Identified Concrete Defects", use_container_width=True)
-    
-    # Extract defect information
     defects = []
     for result in results:
         for box in result.boxes:
@@ -207,119 +164,226 @@ if uploaded_file is not None:
             defects.append({
                 "type": class_name,
                 "confidence": confidence,
-                "location": [float(coord) for coord in box.xywh[0]]  # x_center, y_center, width, height
+                "location": [float(coord) for coord in box.xywh[0]]
             })
     
-    # Display defect information
-    if defects:
-        st.subheader("📊 Concrete Defect Inventory")
+    annotated_image = results[0].plot()
+    return defects, annotated_image
+
+def create_comparison_table(pre_defects, during_defects):
+    """Create a comparison table of defects"""
+    pre_counts = {}
+    for defect in pre_defects:
+        pre_counts[defect['type']] = pre_counts.get(defect['type'], 0) + 1
+    
+    during_counts = {}
+    for defect in during_defects:
+        during_counts[defect['type']] = during_counts.get(defect['type'], 0) + 1
+    
+    all_defect_types = set(list(pre_counts.keys()) + list(during_counts.keys()))
+    
+    comparison_data = []
+    for defect_type in sorted(all_defect_types):
+        comparison_data.append({
+            "Defect Type": defect_type,
+            "Pre-Tenancy": pre_counts.get(defect_type, 0),
+            "During Tenancy": during_counts.get(defect_type, 0),
+            "Change": during_counts.get(defect_type, 0) - pre_counts.get(defect_type, 0)
+        })
+    
+    return comparison_data
+
+# ----------------------------
+# 4. Streamlit UI with Side-by-Side Comparison
+# ----------------------------
+st.title("🏗️ Warehouse Concrete Defect Comparison Analysis")
+st.write("Upload both pre-tenancy and during-tenancy images for comprehensive side-by-side analysis.")
+
+# Tenancy context information
+st.subheader("📋 Tenancy Information")
+col1, col2 = st.columns(2)
+with col1:
+    tenancy_start = st.date_input("Tenancy Start Date", value=datetime.now().replace(year=datetime.now().year-1))
+with col2:
+    building_usage = st.selectbox(
+        "Building Usage:",
+        ["General Storage", "Light Manufacturing", "Heavy Machinery", "Cold Storage", "Distribution Center", "Other"]
+    )
+
+# Image upload sections side by side
+st.subheader("📸 Upload Comparison Images")
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### Pre-Tenancy (Before Move-In)")
+    pre_tenancy_file = st.file_uploader("Pre-tenancy image...", type=["jpg", "jpeg", "png"], key="pre_tenancy")
+
+with col2:
+    st.markdown("### During Tenancy (Current Condition)")
+    during_tenancy_file = st.file_uploader("During-tenancy image...", type=["jpg", "jpeg", "png"], key="during_tenancy")
+
+# Check if we have the API key set up
+try:
+    has_api_key = any(key in st.secrets for key in ['HUGGINGFACEHUB_API_TOKEN', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'])
+    if not has_api_key:
+        st.warning("Hugging Face API token not found. Comparative analysis may not be available.")
+    else:
+        st.success("Hugging Face API key authenticated. Ready for comparative analysis.")
+except:
+    st.warning("Unable to verify API configuration. Some features may be limited.")
+
+if pre_tenancy_file and during_tenancy_file:
+    # Display images side by side
+    st.subheader("🖼️ Image Comparison")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        pre_image = Image.open(pre_tenancy_file)
+        st.image(pre_image, caption="Pre-Tenancy Condition", use_container_width=True)
+    
+    with col2:
+        during_image = Image.open(during_tenancy_file)
+        st.image(during_image, caption="During-Tenancy Condition", use_container_width=True)
+    
+    # Analyze both images
+    pre_defects, pre_annotated = analyze_image(pre_image, "pre-tenancy")
+    during_defects, during_annotated = analyze_image(during_image, "during-tenancy")
+    
+    # Display annotated images side by side
+    st.subheader("🔍 Defect Detection Results")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.image(pre_annotated, caption="Pre-Tenancy Defects Detected", use_container_width=True)
+    
+    with col2:
+        st.image(during_annotated, caption="During-Tenancy Defects Detected", use_container_width=True)
+    
+    # Display defect counts side by side
+    st.subheader("📊 Defect Comparison Summary")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Pre-Tenancy Defects:**")
+        pre_counts = {}
+        for defect in pre_defects:
+            pre_counts[defect['type']] = pre_counts.get(defect['type'], 0) + 1
         
-        # Group defects by type for better presentation
-        defect_counts = {}
-        for defect in defects:
-            defect_type = defect['type']
-            defect_counts[defect_type] = defect_counts.get(defect_type, 0) + 1
+        for defect_type, count in pre_counts.items():
+            st.write(f"• {defect_type}: {count} instance(s)")
         
-        st.write("**Defect Type Summary:**")
-        for defect_type, count in defect_counts.items():
-            st.write(f"• **{defect_type}**: {count} instance(s) detected")
+        st.metric("Total Pre-Tenancy Defects", len(pre_defects))
+    
+    with col2:
+        st.markdown("**During-Tenancy Defects:**")
+        during_counts = {}
+        for defect in during_defects:
+            during_counts[defect['type']] = during_counts.get(defect['type'], 0) + 1
         
-        # Show individual defects in a detailed table
-        st.write("**Individual Defect Details:**")
-        for i, defect in enumerate(defects, 1):
-            st.write(f"{i}. **{defect['type']}** - Detection confidence: {defect['confidence']*100:.1f}%")
+        for defect_type, count in during_counts.items():
+            st.write(f"• {defect_type}: {count} instance(s)")
         
-        # Prepare inspection context for analysis
-        context_info = f"""
-        Inspection Type: {inspection_context}
-        Tenancy Duration: {tenancy_duration} months
+        st.metric("Total During-Tenancy Defects", len(during_defects))
+        change = len(during_defects) - len(pre_defects)
+        st.metric("Defect Count Change", change, delta=f"{change} defects")
+    
+    # Comparative analysis
+    if pre_defects or during_defects:
+        st.subheader("🧠 Comprehensive Comparative Analysis")
+        
+        inspection_context = f"""
+        Tenancy Duration: {(datetime.now().date() - tenancy_start).days} days
         Building Usage: {building_usage}
-        Inspection Date: {datetime.now().strftime('%Y-%m-%d')}
+        Analysis Date: {datetime.now().strftime('%Y-%m-%d')}
         """
         
-        # Get and display professional engineering analysis
-        st.subheader("🧠 Comprehensive Defect Analysis with Tenancy Context")
-        st.info(f"**Analysis includes:** Defect analysis + Tenancy timeline assessment + Liability determination + {inspection_context} recommendations")
-        
-        with st.spinner("Generating tenancy context analysis..."):
-            analysis = get_llm_commentary(defects, context_info)
-        
+        analysis = get_comparative_analysis(pre_defects, during_defects, inspection_context)
         st.write(analysis)
         
-        # Add tenancy-specific references
-        with st.expander("📚 Tenancy Defect Liability Guidelines"):
-            st.write("""
-            **Typical Liability Classifications:**
+        # Detailed comparison table
+        st.subheader("📈 Detailed Defect Comparison")
+        comparison_data = create_comparison_table(pre_defects, during_defects)
+        
+        # Display as metrics or table
+        for data in comparison_data:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(f"Pre-Tenancy {data['Defect Type']}", data['Pre-Tenancy'])
+            with col2:
+                st.metric(f"During-Tenancy {data['Defect Type']}", data['During Tenancy'])
+            with col3:
+                st.metric("Change", data['Change'], delta=f"{data['Change']}")
+        
+        # Visual comparison chart
+        try:
+            import matplotlib.pyplot as plt
             
-            **LANDLORD RESPONSIBILITY (Usually):**
-            - Structural defects pre-dating tenancy
-            - Foundation settlement issues
-            - Roof leaks and water penetration
-            - Pre-existing corrosion or decay
+            st.subheader("📊 Defect Progression Chart")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            defect_types = [data['Defect Type'] for data in comparison_data]
+            pre_values = [data['Pre-Tenancy'] for data in comparison_data]
+            during_values = [data['During Tenancy'] for data in comparison_data]
+            
+            x = np.arange(len(defect_types))
+            width = 0.35
+            
+            ax.bar(x - width/2, pre_values, width, label='Pre-Tenancy', alpha=0.8)
+            ax.bar(x + width/2, during_values, width, label='During-Tenancy', alpha=0.8)
+            
+            ax.set_xlabel('Defect Types')
+            ax.set_ylabel('Number of Defects')
+            ax.set_title('Defect Comparison: Pre-Tenancy vs During-Tenancy')
+            ax.set_xticks(x)
+            ax.set_xticklabels(defect_types, rotation=45, ha='right')
+            ax.legend()
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+        except ImportError:
+            st.info("Install matplotlib for visual charts: `pip install matplotlib`")
+        
+        # Liability assessment guide
+        with st.expander("📋 Liability Assessment Guidelines"):
+            st.write("""
+            **Typical Responsibility Classification:**
+            
+            **Landlord Responsibility:**
+            - Pre-existing structural defects
+            - Foundation and structural settlement
+            - Pre-tenancy corrosion or decay
             - Building code compliance issues
             
-            **TENANT RESPONSIBILITY (Usually):**
-            - Damage from improper use or overload
-            - Lack of routine maintenance
+            **Tenant Responsibility:**
+            - New damage from improper use
             - Accident-related damage
-            - Modifications without approval
-            - Neglect leading to deterioration
+            - Lack of reported maintenance issues
+            - Unapproved modifications
             
-            **SHARED RESPONSIBILITY (Case-by-case):**
-            - Wear and tear vs actual damage
+            **Shared Responsibility:**
+            - Normal wear and tear progression
             - Pre-existing conditions exacerbated by use
-            - Maintenance issues that weren't reported
-            - Environmental factors affecting both parties
-            
-            **Documentation Requirements:**
-            - Pre-tenancy inspection reports with photos
-            - Regular maintenance records
-            - Tenant reporting timelines
-            - Professional assessment documentation
-            """)
-        
-        # Additional tenancy-specific recommendations
-        with st.expander("💼 Practical Tenancy Advice"):
-            st.write("""
-            **For Pre-Tenancy Inspections:**
-            - Document all existing defects thoroughly with photos
-            - Create detailed dilapidation schedule
-            - Establish baseline condition for future reference
-            - Consider professional building survey
-            
-            **For During-Tenancy Issues:**
-            - Report defects to landlord promptly
-            - Document communication timelines
-            - Maintain records of any repairs undertaken
-            - Consider independent assessment for disputes
-            
-            **For Post-Tenancy Assessments:**
-            - Compare with pre-tenancy documentation
-            - Assess fair wear and tear vs actual damage
-            - Consider depreciation for aged defects
-            - Seek professional mediation for disputes
+            - Environmental factors affecting both
             """)
         
     else:
-        st.success("✅ No structural defects detected! The concrete elements appear to be in sound condition.")
+        st.success("✅ No defects detected in either period! Structure appears well-maintained.")
         
-        # Even with no defects, provide tenancy context advice
-        if inspection_context == "Pre-Tenancy (Before Move-In)":
-            st.info("**Pre-Tenancy Recommendation:** Document this sound condition with timestamped photos for future reference.")
-        elif inspection_context == "During Tenancy (Occupied)":
-            st.info("**During Tenancy Status:** No tenant-induced defects detected. Continue regular maintenance schedule.")
-        else:
-            st.info("**Post-Tenancy Status:** No additional defects beyond normal wear and tear detected.")
+        # Even with no defects, provide comparative analysis
+        st.info("""
+        **Comparative Analysis:** No structural defects detected in either pre-tenancy or during-tenancy inspections. 
+        This indicates excellent maintenance and proper usage during the tenancy period.
+        """)
 
-# Add professional footer with tenancy context
+# Add professional footer
 st.markdown("---")
 st.markdown("""
 **Disclaimer**: 
-- This analysis provides preliminary assessment for informational purposes only
-- Final liability determinations should be made by qualified building surveyors
-- Local tenancy laws and lease agreements take precedence over general guidelines
-- Always consult legal professionals for tenancy dispute resolution
+- Comparative analysis provided for informational purposes only
+- Final liability determinations require professional building survey
+- Local tenancy laws and lease agreements take precedence
+- Always consult qualified professionals for legal disputes
 """)
 
-# Add engineering certification note
-st.caption("_Analysis generated for informational purposes. Final determinations should be made by qualified building surveyors and legal professionals._")
+st.caption("_Comparative analysis generated using AI-assisted assessment. Final determinations require professional inspection._")
