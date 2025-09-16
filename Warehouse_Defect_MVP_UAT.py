@@ -356,33 +356,33 @@ if st.session_state.area_results:
             for filename, result in photo_results.items():
                 st.write(f"**Photo:** {filename}")
                 
-        
-                if result['has_defects']:
-                    defect_summary = ", ".join([
-                        f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
-                        for defect_type, count in result['defect_counts'].items()
-                    ])
-                    st.write(f"**Defects:** {defect_summary}")
-                    st.write(f"**AI Analysis:** {result['analysis']}")
-                    
-                    # Show user comments if available
-                    user_comment = st.session_state.user_comments[area_name].get(filename, "")
-                    if user_comment:
-                        st.write(f"**User Comments:** {user_comment}")
-                
-                # Change to:
-                if result['has_defects']:
-                    defect_summary = ", ".join([
-                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
-                        for defect_type, count in result['defect_counts'].items()
-                    ])
-                    st.write(f"**Defects:** {defect_summary}")
-                    st.write(f"**Summary:** {result['analysis']}")
-                    
-                    # Show user comments if available
-                    user_comment = st.session_state.user_comments[area_name].get(filename, "")
-                    if user_comment:
-                        st.write(f"**User Comments:** {user_comment}")
+
+if result['has_defects']:
+    defect_summary = ", ".join([
+        f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
+        for defect_type, count in result['defect_counts'].items()
+    ])
+    st.write(f"**Defects:** {defect_summary}")
+    st.write(f"**AI Analysis:** {result['analysis']}")
+    
+    # Show user comments if available
+    user_comment = st.session_state.user_comments[area_name].get(filename, "")
+    if user_comment:
+        st.write(f"**User Comments:** {user_comment}")
+
+# Change to:
+if result['has_defects']:
+    defect_summary = ", ".join([
+        f"{count} {defect_type}{'s' if count > 1 else ''}" 
+        for defect_type, count in result['defect_counts'].items()
+    ])
+    st.write(f"**Defects:** {defect_summary}")
+    st.write(f"**Summary:** {result['analysis']}")
+    
+    # Show user comments if available
+    user_comment = st.session_state.user_comments[area_name].get(filename, "")
+    if user_comment:
+        st.write(f"**User Comments:** {user_comment}")
     
     # Summary statistics
     if total_photos > 0:
