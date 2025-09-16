@@ -38,12 +38,36 @@ def load_yolo_model(model_path):
 
 model = load_yolo_model(model_file)
 # ----------------------------
-# 2. LLM Analysis Functions (Concise - Direct Summary)
+# 2. LLM Analysis Functions (Fixed for proper defect mapping)
 # ----------------------------
+def map_defect_name(defect_type):
+    """Map numeric or unclear defect names to meaningful descriptions"""
+    defect_mapping = {
+        "0": "crack",
+        "zero-clearance joint": "crack",
+        "00": "hairline crack", 
+        "1": "spalling",
+        "2": "corrosion",
+        "3": "staining",
+        "4": "efflorescence",
+        "5": "scaling",
+        "6": "popout",
+        "7": "discoloration",
+        "8": "honeycombing",
+        "9": "void"
+    }
+    return defect_mapping.get(defect_type.lower(), defect_type)
+
 def get_llm_concise_analysis(defect_types, area_name):
     """
-    Use LLM to generate direct, concise summary of defects
+    Use LLM to generate direct, concise summary of defects with proper naming
     """
+    # First, map all defect names to meaningful descriptions
+    mapped_defect_types = {}
+    for defect_type, count in defect_types.items():
+        mapped_name = map_defect_name(defect_type)
+        mapped_defect_types[mapped_name] = mapped_defect_types.get(mapped_name, 0) + count
+    
     # Get API key from Streamlit secrets
     try:
         if 'HUGGINGFACEHUB_API_TOKEN' in st.secrets:
@@ -54,12 +78,12 @@ def get_llm_concise_analysis(defect_types, area_name):
             api_key = st.secrets['HF_TOKEN']
         else:
             # Fallback description without LLM
-            defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
-                                      for defect_type, count in defect_types.items()])
+            defect_summary = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
+                                      for defect_name, count in mapped_defect_types.items()])
             return defect_summary
     except:
-        defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
-                                  for defect_type, count in defect_types.items()])
+        defect_summary = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
+                                  for defect_name, count in mapped_defect_types.items()])
         return defect_summary
     
     try:
@@ -69,13 +93,13 @@ def get_llm_concise_analysis(defect_types, area_name):
         )
         
         # Create a natural language description of the defects
-        defect_description = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
-                                      for defect_type, count in defect_types.items()])
+        defect_description = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
+                                      for defect_name, count in mapped_defect_types.items()])
         
         prompt = f"""
-        Concrete defects detected: {defect_description} in {area_name}.
-        Provide a very brief, direct summary of the defects. No introductions, no explanations.
-        Just state the defects concisely.
+        Concrete defects: {defect_description} in {area_name}.
+        Provide a very brief summary. Just state the defects concisely without explanations.
+        Example: "3 hairline cracks detected in north wall"
         """
         
         response = client.chat.completions.create(
@@ -83,14 +107,14 @@ def get_llm_concise_analysis(defect_types, area_name):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a structural engineer. Provide extremely concise defect summaries. No introductions, no explanations. Just state the facts directly. Maximum 1-2 sentences."
+                    "content": "You are a structural engineer. Provide extremely concise defect summaries. No introductions, no explanations. Just state the facts directly. Maximum 1 sentence. Use simple language like 'X cracks detected in Y location'."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            max_tokens=50,
+            max_tokens=30,
             temperature=0.1,
             top_p=0.8,
             stream=False
@@ -98,28 +122,23 @@ def get_llm_concise_analysis(defect_types, area_name):
         
         analysis = response.choices[0].message.content.strip()
         
-        # Clean up any remaining verbose language
+        # Clean up any verbose language
         analysis = analysis.replace("Based on the provided information, ", "")
         analysis = analysis.replace("I will describe ", "")
         analysis = analysis.replace("The defects include ", "")
         analysis = analysis.replace("There are ", "")
         analysis = analysis.replace("We have detected ", "")
-        
-        # If it's still too long, just use the defect summary
-        if len(analysis.split()) > 15:
-            defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
-                                      for defect_type, count in defect_types.items()])
-            return defect_summary
+        analysis = analysis.replace("The analysis shows ", "")
         
         return analysis
         
     except Exception as e:
-        defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
-                                  for defect_type, count in defect_types.items()])
+        defect_summary = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
+                                  for defect_name, count in mapped_defect_types.items()])
         return defect_summary
 
 # ----------------------------
-# 3. Helper Functions
+# 3. Helper Functions (Updated with defect mapping)
 # ----------------------------
 def analyze_image(image, area_name, filename):
     """Analyze a single image and return defect counts with annotated image"""
@@ -142,7 +161,10 @@ def analyze_image(image, area_name, filename):
             class_id = int(box.cls[0])
             class_name = result.names[class_id]
             confidence = float(box.conf[0])
-            defect_counts[class_name] += 1
+            
+            # Map the defect name to something meaningful
+            mapped_name = map_defect_name(class_name)
+            defect_counts[mapped_name] += 1
             
             # Get bounding box coordinates
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
@@ -150,8 +172,8 @@ def analyze_image(image, area_name, filename):
             # Draw bounding box
             draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
             
-            # Draw label with confidence
-            label = f"{class_name} ({confidence:.2f})"
+            # Draw label with confidence (using mapped name)
+            label = f"{mapped_name} ({confidence:.2f})"
             draw.text((x1, y1 - 20), label, fill="red", font=font)
     
     return defect_counts, annotated_image, image
