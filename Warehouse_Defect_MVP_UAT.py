@@ -316,10 +316,10 @@ if st.session_state.custom_areas:
                                 st.subheader("📝 Additional Comments")
                                 
                                 # Create columns for the button and text area
-                                btn_col, _ = st.columns([1, 3])
+                                btn_col, _ = st.columns([2, 3])
                                 
                                 with btn_col:
-                                    if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}"):
+                                    if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}", use_container_width=True):
                                         # Populate text area with AI analysis
                                         st.session_state.user_comments[area_name][filename] = result['analysis']
                                         st.rerun()
