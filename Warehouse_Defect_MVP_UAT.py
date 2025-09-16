@@ -3,6 +3,10 @@ import streamlit as st
 from PIL import Image
 from ultralytics import YOLO
 import gdown
+import requests
+import json
+import time
+from openai import OpenAI
 from datetime import datetime
 
 # ----------------------------
@@ -32,10 +36,69 @@ def load_yolo_model(model_path):
 model = load_yolo_model(model_file)
 
 # ----------------------------
-# 2. Helper Functions
+# 2. LLM Analysis Functions (Concise)
+# ----------------------------
+def get_llm_concise_analysis(defect_type, confidence, area_name):
+    """
+    Use LLM to generate concise 1-2 line analysis of the defect
+    """
+    # Get API key from Streamlit secrets
+    try:
+        if 'HUGGINGFACEHUB_API_TOKEN' in st.secrets:
+            api_key = st.secrets['HUGGINGFACEHUB_API_TOKEN']
+        elif 'HUGGINGFACE_API_KEY' in st.secrets:
+            api_key = st.secrets['HUGGINGFACE_API_KEY']
+        elif 'HF_TOKEN' in st.secrets:
+            api_key = st.secrets['HF_TOKEN']
+        else:
+            return f"{defect_type.replace('_', ' ').title()} detected. Professional assessment recommended."
+    except:
+        return f"{defect_type.replace('_', ' ').title()} detected. Professional assessment recommended."
+    
+    try:
+        client = OpenAI(
+            base_url="https://router.huggingface.co/v1",
+            api_key=api_key,
+        )
+        
+        prompt = f"""
+        As a structural engineer, provide a concise 1-2 line analysis of this concrete defect:
+        
+        DEFECT: {defect_type}
+        LOCATION: {area_name}
+        CONFIDENCE: {confidence:.0%}
+        
+        Provide only the most essential information: brief description and recommended action.
+        """
+        
+        response = client.chat.completions.create(
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a structural engineer providing very concise 1-2 line defect analyses. Be direct and practical."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=100,
+            temperature=0.2,
+            top_p=0.8,
+            stream=False
+        )
+        
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        return f"{defect_type.replace('_', ' ').title()} detected. Requires professional assessment."
+
+# ----------------------------
+# 3. Helper Functions
 # ----------------------------
 def analyze_image(image, area_name):
-    """Analyze a single image and return defects with concise descriptions"""
+    """Analyze a single image and return defects"""
     with st.spinner(f"Analyzing {area_name}..."):
         results = model(image)
     
@@ -46,187 +109,172 @@ def analyze_image(image, area_name):
             class_name = result.names[class_id]
             confidence = float(box.conf[0])
             
-            # Generate concise description based on defect type
-            description = generate_defect_description(class_name, confidence)
-            
             defects.append({
                 "type": class_name,
                 "confidence": confidence,
-                "description": description,
-                "area": area_name
+                "area": area_name,
+                "analysis": None  # Will be populated by LLM
             })
     
     return defects, results[0].plot()
 
-def generate_defect_description(defect_type, confidence):
-    """Generate concise 1-2 line descriptions for each defect type"""
-    descriptions = {
-        "crack": f"Hairline crack detected ({confidence:.0%} confidence). Monitor for width changes.",
-        "hairline_crack": f"Fine hairline crack ({confidence:.0%} confidence). Typically cosmetic but monitor progression.",
-        "medium_crack": f"Medium-width crack ({confidence:.0%} confidence). Requires inspection for structural implications.",
-        "wide_crack": f"Significant crack ({confidence:.0%} confidence). Immediate professional assessment recommended.",
-        "spalling": f"Concrete spalling detected ({confidence:.0%} confidence). Surface deterioration exposing aggregate.",
-        "corrosion": f"Corrosion staining ({confidence:.0%} confidence). Indicates potential reinforcement deterioration.",
-        "staining": f"Surface staining ({confidence:.0%} confidence). May indicate moisture penetration or chemical exposure.",
-        "efflorescence": f"Efflorescence present ({confidence:.0%} confidence). Salt deposits indicating moisture migration.",
-        "scaling": f"Surface scaling ({confidence:.0%} confidence). Freeze-thaw or chemical damage evident.",
-        "popout": f"Popout defect ({confidence:.0%} confidence). Localized concrete surface failure.",
-        "discoloration": f"Discoloration detected ({confidence:.0%} confidence). May indicate material inconsistencies.",
-        "honeycombing": f"Honeycombing present ({confidence:.0%} confidence). Poor compaction during construction.",
-        "void": f"Surface void ({confidence:.0%} confidence). Air pocket or imperfect finishing.",
-    }
-    
-    # Find the best matching description
-    for key, desc in descriptions.items():
-        if key in defect_type.lower():
-            return desc
-    
-    # Default description for unknown defect types
-    return f"{defect_type.replace('_', ' ').title()} detected ({confidence:.0%} confidence). Professional assessment recommended."
-
 # ----------------------------
-# 3. Streamlit UI - Simplified List View
+# 4. Streamlit UI - Area-based Organization
 # ----------------------------
 st.title("🏗️ Warehouse Defect Inspection")
-st.write("Upload photos of different warehouse areas to generate a concise defect list.")
+st.write("Upload photos organized by warehouse areas for concise defect analysis.")
 
-# Initialize session state for defects
-if 'all_defects' not in st.session_state:
-    st.session_state.all_defects = []
+# Check API status
+try:
+    has_api_key = any(key in st.secrets for key in ['HUGGINGFACEHUB_API_TOKEN', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'])
+    if not has_api_key:
+        st.warning("LLM analysis requires Hugging Face API key for optimal results.")
+    else:
+        st.success("LLM analysis enabled. Ready for concise defect reporting.")
+except:
+    st.warning("Secrets configuration not accessible.")
 
-# File uploader for multiple images
-uploaded_files = st.file_uploader(
-    "Upload warehouse area photos", 
-    type=["jpg", "jpeg", "png"], 
-    accept_multiple_files=True,
-    help="Upload photos of different areas: floors, walls, columns, ceilings, etc."
-)
+# Initialize session state
+if 'area_defects' not in st.session_state:
+    st.session_state.area_defects = {}
 
-# Area naming for each uploaded file
-if uploaded_files:
-    st.subheader("📝 Identify Warehouse Areas")
-    
-    area_names = {}
-    for i, uploaded_file in enumerate(uploaded_files):
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            st.image(uploaded_file, width=100)
-        with col2:
-            area_name = st.text_input(
-                f"Area description for image {i+1}:",
-                placeholder="e.g., North wall, Column B2, Main floor section",
-                key=f"area_{i}"
-            )
-            area_names[i] = area_name if area_name else f"Area {i+1}"
+# Area-based photo upload and analysis
+st.subheader("📁 Organize by Warehouse Areas")
 
-# Process images button
-if uploaded_files and st.button("🔍 Analyze All Images", type="primary"):
-    st.session_state.all_defects = []  # Reset defects
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    for i, uploaded_file in enumerate(uploaded_files):
-        area_name = area_names[i]
-        status_text.text(f"Analyzing {area_name}... ({i+1}/{len(uploaded_files)})")
+# Define warehouse areas
+warehouse_areas = [
+    "North Wall", "South Wall", "East Wall", "West Wall",
+    "Floor - Main Area", "Floor - Loading Dock", "Floor - Storage Section",
+    "Columns - Main Hall", "Columns - Perimeter", "Columns - Support Beams",
+    "Ceiling - Main", "Ceiling - Office Area", "Ceiling - Storage",
+    "Doors & Entrances", "Windows & Ventilation", "Other Areas"
+]
+
+# Create tabs for each area
+area_tabs = st.tabs([f"📍 {area}" for area in warehouse_areas])
+
+for i, area_tab in enumerate(area_tabs):
+    with area_tab:
+        area_name = warehouse_areas[i]
+        st.subheader(f"{area_name}")
         
-        # Process image
-        image = Image.open(uploaded_file)
-        defects, annotated_image = analyze_image(image, area_name)
+        # File upload for this specific area
+        uploaded_files = st.file_uploader(
+            f"Upload photos for {area_name}",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+            key=f"uploader_{i}"
+        )
         
-        # Store results
-        st.session_state.all_defects.extend(defects)
-        
-        # Show quick preview
-        with st.expander(f"📸 {area_name} - {len(defects)} defects found", expanded=False):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(image, caption="Original", use_container_width=True)
-            with col2:
-                st.image(annotated_image, caption="Defects Detected", use_container_width=True)
+        # Process button for this area
+        if uploaded_files and st.button(f"Analyze {area_name}", key=f"btn_{i}"):
+            area_defects = []
             
-            # Show defects for this area
-            if defects:
-                st.write("**Defects in this area:**")
-                for defect in defects:
-                    st.write(f"• {defect['description']}")
-        
-        progress_bar.progress((i + 1) / len(uploaded_files))
-    
-    status_text.text("Analysis complete!")
-    progress_bar.empty()
+            for j, uploaded_file in enumerate(uploaded_files):
+                with st.spinner(f"Processing image {j+1}/{len(uploaded_files)}..."):
+                    image = Image.open(uploaded_file)
+                    defects, annotated_image = analyze_image(image, area_name)
+                    
+                    # Get LLM analysis for each defect
+                    for defect in defects:
+                        defect['analysis'] = get_llm_concise_analysis(
+                            defect['type'], defect['confidence'], area_name
+                        )
+                    
+                    area_defects.extend(defects)
+                    
+                    # Show image results
+                    with st.expander(f"Image {j+1} Results", expanded=False):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.image(image, caption="Original", use_container_width=True)
+                        with col2:
+                            st.image(annotated_image, caption="Defects Detected", use_container_width=True)
+            
+            # Store results for this area
+            st.session_state.area_defects[area_name] = area_defects
+            st.success(f"Analysis complete for {area_name}! Found {len(area_defects)} defects.")
 
-# Display consolidated defect list
-if st.session_state.all_defects:
-    st.subheader("📋 Consolidated Defect List")
-    
-    # Group defects by area
-    defects_by_area = {}
-    for defect in st.session_state.all_defects:
-        if defect['area'] not in defects_by_area:
-            defects_by_area[defect['area']] = []
-        defects_by_area[defect['area']].append(defect)
-    
-    # Display defects in a clean list view
-    for area, defects in defects_by_area.items():
-        with st.expander(f"📍 {area} - {len(defects)} defects", expanded=True):
-            for i, defect in enumerate(defects, 1):
-                st.write(f"**{i}. {defect['type'].replace('_', ' ').title()}**")
-                st.write(f"   {defect['description']}")
+        # Show existing results for this area
+        if area_name in st.session_state.area_defects and st.session_state.area_defects[area_name]:
+            st.subheader(f"Defects in {area_name}")
+            
+            defects = st.session_state.area_defects[area_name]
+            for k, defect in enumerate(defects, 1):
+                st.write(f"**{k}. {defect['type'].replace('_', ' ').title()}**")
+                st.write(f"   {defect['analysis']}")
                 st.progress(defect['confidence'], text=f"Confidence: {defect['confidence']:.0%}")
                 st.write("---")
+
+# Consolidated view of all defects
+if st.session_state.area_defects:
+    st.subheader("📋 All Detected Defects")
+    
+    total_defects = 0
+    for area_name, defects in st.session_state.area_defects.items():
+        if defects:
+            total_defects += len(defects)
+            with st.expander(f"📍 {area_name} - {len(defects)} defects", expanded=False):
+                for i, defect in enumerate(defects, 1):
+                    st.write(f"**{i}. {defect['type'].replace('_', ' ').title()}**")
+                    st.write(f"   {defect['analysis']}")
+                    st.progress(defect['confidence'], text=f"Confidence: {defect['confidence']:.0%}")
+                    st.write("---")
     
     # Summary statistics
-    st.subheader("📊 Inspection Summary")
-    col1, col2, col3 = st.columns(3)
-    
-    total_defects = len(st.session_state.all_defects)
-    unique_defect_types = len(set(defect['type'] for defect in st.session_state.all_defects))
-    areas_inspected = len(defects_by_area)
-    
-    col1.metric("Total Defects", total_defects)
-    col2.metric("Unique Defect Types", unique_defect_types)
-    col3.metric("Areas Inspected", areas_inspected)
-    
-    # Defect type distribution
     if total_defects > 0:
-        st.write("**Defect Type Distribution:**")
-        defect_counts = {}
-        for defect in st.session_state.all_defects:
-            defect_type = defect['type'].replace('_', ' ').title()
-            defect_counts[defect_type] = defect_counts.get(defect_type, 0) + 1
+        st.subheader("📊 Summary")
+        col1, col2, col3 = st.columns(3)
         
-        for defect_type, count in sorted(defect_counts.items(), key=lambda x: x[1], reverse=True):
-            st.write(f"• {defect_type}: {count} instance(s)")
-    
-    # Export option
-    st.download_button(
-        label="📄 Export Defect Report",
-        data="\n".join([f"{d['area']}: {d['description']}" for d in st.session_state.all_defects]),
-        file_name=f"defect_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-        mime="text/plain"
-    )
+        areas_with_defects = sum(1 for defects in st.session_state.area_defects.values() if defects)
+        unique_defect_types = set()
+        for defects in st.session_state.area_defects.values():
+            for defect in defects:
+                unique_defect_types.add(defect['type'])
+        
+        col1.metric("Total Defects", total_defects)
+        col2.metric("Areas with Defects", areas_with_defects)
+        col3.metric("Unique Defect Types", len(unique_defect_types))
+        
+        # Export option
+        report_data = "WAREHOUSE DEFECT INSPECTION REPORT\n"
+        report_data += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        report_data += "="*50 + "\n\n"
+        
+        for area_name, defects in st.session_state.area_defects.items():
+            if defects:
+                report_data += f"AREA: {area_name}\n"
+                report_data += "-"*30 + "\n"
+                for defect in defects:
+                    report_data += f"• {defect['type'].replace('_', ' ').title()}: {defect['analysis']}\n"
+                report_data += "\n"
+        
+        st.download_button(
+            label="📄 Export Report",
+            data=report_data,
+            file_name=f"warehouse_inspection_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+            mime="text/plain"
+        )
 
 else:
-    st.info("👆 Upload photos of warehouse areas to begin inspection. Add descriptive names for each area for better organization.")
+    st.info("👆 Select a warehouse area tab above to upload photos and analyze defects.")
 
 # Quick guide
-with st.expander("ℹ️ Inspection Guide"):
+with st.expander("ℹ️ How to Use"):
     st.write("""
-    **How to use:**
-    1. Upload photos of different warehouse areas (floors, walls, columns, etc.)
-    2. Provide descriptive names for each area (e.g., "North wall near entrance")
-    3. Click "Analyze All Images" to process all photos
-    4. Review the consolidated defect list with concise descriptions
+    **Workflow:**
+    1. Select a warehouse area tab (walls, floors, columns, etc.)
+    2. Upload photos for that specific area
+    3. Click "Analyze [Area Name]" to process the photos
+    4. Review concise defect analysis for that area
+    5. Repeat for other areas as needed
     
-    **Defect Severity Guidelines:**
-    - **Hairline cracks**: Monitor, typically cosmetic
-    - **Medium cracks**: Requires professional assessment
-    - **Wide cracks**: Immediate attention needed
-    - **Spalling/Corrosion**: Structural assessment recommended
-    - **Staining/Efflorescence**: Investigate moisture sources
+    **Features:**
+    - Organized by warehouse areas for easy navigation
+    - Concise 1-2 line defect analysis using LLM
+    - Area-specific photo management
+    - Consolidated view of all defects
     """)
 
-# Add footer
 st.markdown("---")
-st.caption("Warehouse Defect Inspection System • Automated defect detection with concise reporting")
+st.caption("Warehouse Defect Inspection • Organized by Area • Concise LLM Analysis")
