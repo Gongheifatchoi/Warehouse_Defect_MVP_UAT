@@ -10,7 +10,6 @@ from openai import OpenAI
 from datetime import datetime
 import numpy as np
 from collections import Counter
-import io
 
 # ----------------------------
 # 1. Model setup
@@ -37,8 +36,9 @@ def load_yolo_model(model_path):
     return YOLO(model_path)
 
 model = load_yolo_model(model_file)
+
 # ----------------------------
-# 2. LLM Analysis Functions (Fixed for proper defect mapping)
+# 2. LLM Analysis Functions
 # ----------------------------
 def map_defect_name(defect_type):
     """Map numeric or unclear defect names to meaningful descriptions"""
@@ -54,7 +54,14 @@ def map_defect_name(defect_type):
         "6": "popout",
         "7": "discoloration",
         "8": "honeycombing",
-        "9": "void"
+        "9": "void",
+        "crack": "crack",
+        "hairline_crack": "hairline crack",
+        "medium_crack": "medium crack",
+        "wide_crack": "wide crack",
+        "spalling": "spalling",
+        "corrosion": "corrosion",
+        "staining": "staining"
     }
     return defect_mapping.get(defect_type.lower(), defect_type)
 
@@ -138,7 +145,7 @@ def get_llm_concise_analysis(defect_types, area_name):
         return defect_summary
 
 # ----------------------------
-# 3. Helper Functions (Updated with defect mapping)
+# 3. Helper Functions
 # ----------------------------
 def analyze_image(image, area_name, filename):
     """Analyze a single image and return defect counts with annotated image"""
@@ -179,7 +186,7 @@ def analyze_image(image, area_name, filename):
     return defect_counts, annotated_image, image
 
 # ----------------------------
-# 4. Streamlit UI - Enhanced Layout with Free Text Box
+# 4. Streamlit UI
 # ----------------------------
 st.title("🏗️ Warehouse Defect Inspection")
 st.write("Create custom areas and upload photos to analyze defects with bounding boxes.")
@@ -293,45 +300,45 @@ if st.session_state.custom_areas:
                                 use_container_width=True
                             )
                         
-with col2:
-    # Show defects summary
-    if result['has_defects']:
-        # Create a natural language summary of defects (using already mapped names)
-        defect_summary = ", ".join([
-            f"{count} {defect_type}{'s' if count > 1 else ''}" 
-            for defect_type, count in result['defect_counts'].items()
-        ])
-        
-        st.write(f"**Defects found:** {defect_summary}")
-        st.write("**Summary:**", result['analysis'])
-        
-        # Free text box for user comments with AI summary button
-        st.subheader("📝 Additional Comments")
-        
-        # Create columns for the button and text area
-        btn_col, _ = st.columns([1, 3])
-        
-        with btn_col:
-            if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}"):
-                # Populate text area with AI analysis
-                st.session_state.user_comments[area_name][filename] = result['analysis']
-                st.rerun()
-        
-        # User comments text area
-        comment_key = f"comment_{area_name}_{filename}"
-        user_comment = st.text_area(
-            "Add your observations:",
-            value=st.session_state.user_comments[area_name].get(filename, ""),
-            height=100,
-            key=comment_key
-        )
-        
-        # Store user comment
-        st.session_state.user_comments[area_name][filename] = user_comment
-        
-    else:
-        st.success("✅ No defects detected in this photo")
-        st.info("The concrete surface appears to be in good condition.")
+                        with col2:
+                            # Show defects summary
+                            if result['has_defects']:
+                                # Create a natural language summary of defects
+                                defect_summary = ", ".join([
+                                    f"{count} {defect_type}{'s' if count > 1 else ''}" 
+                                    for defect_type, count in result['defect_counts'].items()
+                                ])
+                                
+                                st.write(f"**Defects found:** {defect_summary}")
+                                st.write("**Summary:**", result['analysis'])
+                                
+                                # Free text box for user comments with AI summary button
+                                st.subheader("📝 Additional Comments")
+                                
+                                # Create columns for the button and text area
+                                btn_col, _ = st.columns([1, 3])
+                                
+                                with btn_col:
+                                    if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}"):
+                                        # Populate text area with AI analysis
+                                        st.session_state.user_comments[area_name][filename] = result['analysis']
+                                        st.rerun()
+                                
+                                # User comments text area
+                                comment_key = f"comment_{area_name}_{filename}"
+                                user_comment = st.text_area(
+                                    "Add your observations:",
+                                    value=st.session_state.user_comments[area_name].get(filename, ""),
+                                    height=100,
+                                    key=comment_key
+                                )
+                                
+                                # Store user comment
+                                st.session_state.user_comments[area_name][filename] = user_comment
+                                
+                            else:
+                                st.success("✅ No defects detected in this photo")
+                                st.info("The concrete surface appears to be in good condition.")
 
 # Consolidated view of all areas with photos
 if st.session_state.area_results:
@@ -356,33 +363,22 @@ if st.session_state.area_results:
             for filename, result in photo_results.items():
                 st.write(f"**Photo:** {filename}")
                 
-
-if result['has_defects']:
-    defect_summary = ", ".join([
-        f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
-        for defect_type, count in result['defect_counts'].items()
-    ])
-    st.write(f"**Defects:** {defect_summary}")
-    st.write(f"**AI Analysis:** {result['analysis']}")
-    
-    # Show user comments if available
-    user_comment = st.session_state.user_comments[area_name].get(filename, "")
-    if user_comment:
-        st.write(f"**User Comments:** {user_comment}")
-
-# Change to:
-if result['has_defects']:
-    defect_summary = ", ".join([
-        f"{count} {defect_type}{'s' if count > 1 else ''}" 
-        for defect_type, count in result['defect_counts'].items()
-    ])
-    st.write(f"**Defects:** {defect_summary}")
-    st.write(f"**Summary:** {result['analysis']}")
-    
-    # Show user comments if available
-    user_comment = st.session_state.user_comments[area_name].get(filename, "")
-    if user_comment:
-        st.write(f"**User Comments:** {user_comment}")
+                if result['has_defects']:
+                    defect_summary = ", ".join([
+                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
+                        for defect_type, count in result['defect_counts'].items()
+                    ])
+                    st.write(f"**Defects:** {defect_summary}")
+                    st.write(f"**Summary:** {result['analysis']}")
+                    
+                    # Show user comments if available
+                    user_comment = st.session_state.user_comments[area_name].get(filename, "")
+                    if user_comment:
+                        st.write(f"**User Comments:** {user_comment}")
+                else:
+                    st.success("✅ No defects detected")
+                
+                st.write("---")
     
     # Summary statistics
     if total_photos > 0:
@@ -410,7 +406,7 @@ with st.expander("ℹ️ How to Use"):
     **Features:**
     - Bounding boxes around all detected defects
     - Image on left, analysis on right layout
-    - Factual AI analysis without causes/recommendations
+    - Direct, concise defect summaries
     - Free text box for user comments
     - "Use AI Summary" button to quickly populate comments
     """)
