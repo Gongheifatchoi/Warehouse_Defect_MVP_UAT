@@ -98,7 +98,7 @@ def get_llm_concise_analysis(defect_type, confidence, area_name):
 # ----------------------------
 # 3. Helper Functions
 # ----------------------------
-def analyze_image(image, area_name):
+def analyze_image(image, area_name, filename):
     """Analyze a single image and return defects with image crops"""
     with st.spinner(f"Analyzing {area_name}..."):
         results = model(image)
@@ -127,7 +127,8 @@ def analyze_image(image, area_name):
                 "analysis": None,
                 "bbox": [x1, y1, x2, y2],
                 "defect_crop": defect_crop,
-                "original_image": image
+                "original_image": image,
+                "filename": filename
             })
     
     return defects, annotated_image
@@ -140,10 +141,10 @@ def draw_defect_outline(image, bbox):
     return img_copy
 
 # ----------------------------
-# 4. Streamlit UI - Customizable Areas with Visual Defects
+# 4. Streamlit UI - Defects Grouped by Photo
 # ----------------------------
 st.title("🏗️ Warehouse Defect Inspection")
-st.write("Create custom areas and upload photos to see defects with visual outlines.")
+st.write("Create custom areas and upload photos to see defects grouped by photo.")
 
 # Check API status
 try:
@@ -158,8 +159,8 @@ except:
 # Initialize session state
 if 'custom_areas' not in st.session_state:
     st.session_state.custom_areas = {}
-if 'area_defects' not in st.session_state:
-    st.session_state.area_defects = {}
+if 'area_results' not in st.session_state:
+    st.session_state.area_results = {}  # Changed to store results by area and photo
 
 # Custom area creation
 st.subheader("📁 Create Custom Warehouse Areas")
@@ -171,6 +172,7 @@ with col2:
     if st.button("➕ Add Area") and new_area_name:
         if new_area_name not in st.session_state.custom_areas:
             st.session_state.custom_areas[new_area_name] = []
+            st.session_state.area_results[new_area_name] = {}
             st.success(f"Added area: {new_area_name}")
         else:
             st.warning("Area already exists!")
@@ -200,12 +202,12 @@ if st.session_state.custom_areas:
             
             # Process button for this area
             if st.session_state.custom_areas[area_name] and st.button(f"Analyze {area_name}", key=f"btn_{area_name}"):
-                area_defects = []
+                area_photo_results = {}
                 
                 for j, uploaded_file in enumerate(st.session_state.custom_areas[area_name]):
                     with st.spinner(f"Processing image {j+1}/{len(st.session_state.custom_areas[area_name])}..."):
                         image = Image.open(uploaded_file)
-                        defects, annotated_image = analyze_image(image, area_name)
+                        defects, annotated_image = analyze_image(image, area_name, uploaded_file.name)
                         
                         # Get LLM analysis for each defect
                         for defect in defects:
@@ -213,97 +215,119 @@ if st.session_state.custom_areas:
                                 defect['type'], defect['confidence'], area_name
                             )
                         
-                        area_defects.extend(defects)
+                        # Store results by photo
+                        area_photo_results[uploaded_file.name] = {
+                            'defects': defects,
+                            'annotated_image': annotated_image,
+                            'original_image': image,
+                            'has_defects': len(defects) > 0
+                        }
                 
                 # Store results for this area
-                st.session_state.area_defects[area_name] = area_defects
-                st.success(f"Analysis complete for {area_name}! Found {len(area_defects)} defects.")
+                st.session_state.area_results[area_name] = area_photo_results
+                st.success(f"Analysis complete for {area_name}!")
 
-            # Show existing results for this area with visual defects
-            if area_name in st.session_state.area_defects and st.session_state.area_defects[area_name]:
-                st.subheader(f"Defects in {area_name}")
+            # Show results grouped by photo
+            if area_name in st.session_state.area_results and st.session_state.area_results[area_name]:
+                st.subheader(f"Photo Results for {area_name}")
                 
-                defects = st.session_state.area_defects[area_name]
-                for k, defect in enumerate(defects, 1):
-                    # Create columns for image and description
-                    col_img, col_desc = st.columns([1, 2])
-                    
-                    with col_img:
-                        # Show the defect crop with outline
-                        st.image(
-                            defect['defect_crop'], 
-                            caption=f"Defect Location",
-                            use_container_width=True
-                        )
-                    
-                    with col_desc:
-                        st.write(f"**{k}. {defect['type'].replace('_', ' ').title()}**")
-                        st.write(f"**Analysis:** {defect['analysis']}")
-                        st.progress(defect['confidence'], text=f"Confidence: {defect['confidence']:.0%}")
+                photo_results = st.session_state.area_results[area_name]
+                
+                for filename, result in photo_results.items():
+                    with st.expander(f"📷 {filename}", expanded=True):
+                        col1, col2 = st.columns(2)
                         
-                        # Show original image with defect outlined on hover
-                        with st.expander("View in original context", expanded=False):
+                        with col1:
                             st.image(
-                                draw_defect_outline(defect['original_image'], defect['bbox']),
-                                caption="Defect outlined in original image",
+                                result['annotated_image'],
+                                caption="Annotated Image with Defects",
                                 use_container_width=True
                             )
-                    
-                    st.write("---")
+                        
+                        with col2:
+                            st.image(
+                                result['original_image'],
+                                caption="Original Image",
+                                use_container_width=True
+                            )
+                        
+                        # Show defects for this photo or "No defects" message
+                        if result['has_defects']:
+                            st.write(f"**Defects found in this photo:**")
+                            for k, defect in enumerate(result['defects'], 1):
+                                st.write(f"**{k}. {defect['type'].replace('_', ' ').title()}**")
+                                st.write(f"**Analysis:** {defect['analysis']}")
+                                st.progress(defect['confidence'], text=f"Confidence: {defect['confidence']:.0%}")
+                                
+                                # Show defect crop
+                                st.image(
+                                    defect['defect_crop'],
+                                    caption=f"Defect {k} location",
+                                    use_container_width=True
+                                )
+                                st.write("---")
+                        else:
+                            st.success("✅ No defects detected in this photo")
+                            st.info("The concrete surface appears to be in good condition.")
 
-# Consolidated view of all defects with images
-if st.session_state.area_defects:
-    st.subheader("📋 All Detected Defects")
+# Consolidated view of all areas with photos
+if st.session_state.area_results:
+    st.subheader("📋 All Inspection Results")
     
+    total_photos = 0
     total_defects = 0
-    for area_name, defects in st.session_state.area_defects.items():
-        if defects:
-            total_defects += len(defects)
-            with st.expander(f"📍 {area_name} - {len(defects)} defects", expanded=False):
-                for i, defect in enumerate(defects, 1):
-                    # Show defect with image and description side by side
-                    col1, col2 = st.columns([1, 2])
-                    
-                    with col1:
-                        st.image(
-                            defect['defect_crop'],
-                            caption=f"Defect {i}",
-                            use_container_width=True
-                        )
-                    
-                    with col2:
-                        st.write(f"**{defect['type'].replace('_', ' ').title()}**")
-                        st.write(f"**Analysis:** {defect['analysis']}")
-                        st.progress(defect['confidence'], text=f"Confidence: {defect['confidence']:.0%}")
-                    
-                    st.write("---")
+    areas_with_defects = 0
+    
+    for area_name, photo_results in st.session_state.area_results.items():
+        total_photos += len(photo_results)
+        area_defect_count = 0
+        
+        for filename, result in photo_results.items():
+            area_defect_count += len(result['defects'])
+            total_defects += len(result['defects'])
+        
+        if area_defect_count > 0:
+            areas_with_defects += 1
+        
+        with st.expander(f"📍 {area_name} - {len(photo_results)} photos", expanded=False):
+            for filename, result in photo_results.items():
+                st.write(f"**Photo:** {filename}")
+                
+                if result['has_defects']:
+                    st.write(f"**Defects:** {len(result['defects'])} found")
+                    for i, defect in enumerate(result['defects'], 1):
+                        st.write(f"{i}. {defect['type'].replace('_', ' ').title()} - {defect['analysis']}")
+                else:
+                    st.success("✅ No defects detected")
+                
+                st.write("---")
     
     # Summary statistics
-    if total_defects > 0:
+    if total_photos > 0:
         st.subheader("📊 Summary")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
-        areas_with_defects = sum(1 for defects in st.session_state.area_defects.values() if defects)
-        unique_defect_types = set()
-        for defects in st.session_state.area_defects.values():
-            for defect in defects:
-                unique_defect_types.add(defect['type'])
+        col1.metric("Total Areas", len(st.session_state.area_results))
+        col2.metric("Total Photos", total_photos)
+        col3.metric("Total Defects", total_defects)
+        col4.metric("Areas with Defects", areas_with_defects)
         
-        col1.metric("Total Defects", total_defects)
-        col2.metric("Areas with Defects", areas_with_defects)
-        col3.metric("Unique Defect Types", len(unique_defect_types))
-        
-        # Export option with images description
+        # Export option
         report_data = "WAREHOUSE DEFECT INSPECTION REPORT\n"
         report_data += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
         report_data += "="*50 + "\n\n"
         
-        for area_name, defects in st.session_state.area_defects.items():
-            if defects:
-                report_data += f"AREA: {area_name}\n"
-                report_data += "-"*30 + "\n"
-                for defect in defects:
-                    report_data += f"• {defect['type'].replace('_', ' ').title()}: {defect['analysis']} (Confidence: {defect['confidence']:.0%})\n"
+        for area_name, photo_results in st.session_state.area_results.items():
+            report_data += f"AREA: {area_name}\n"
+            report_data += "-"*30 + "\n"
+            
+            for filename, result in photo_results.items():
+                report_data += f"Photo: {filename}\n"
+                if result['has_defects']:
+                    for defect in result['defects']:
+                        report_data += f"  • {defect['type'].replace('_', ' ').title()}: {defect['analysis']} (Confidence: {defect['confidence']:.0%})\n"
+                else:
+                    report_data += "  • No defects detected\n"
                 report_data += "\n"
         
         st.download_button(
@@ -324,12 +348,13 @@ if st.session_state.custom_areas:
     for area_name in list(st.session_state.custom_areas.keys()):
         col1, col2 = st.columns([3, 1])
         with col1:
-            st.write(f"• {area_name} ({len(st.session_state.custom_areas[area_name])} photos)")
+            photo_count = len(st.session_state.custom_areas[area_name])
+            st.write(f"• {area_name} ({photo_count} photo{'s' if photo_count != 1 else ''})")
         with col2:
             if st.button(f"Delete", key=f"del_{area_name}"):
                 del st.session_state.custom_areas[area_name]
-                if area_name in st.session_state.area_defects:
-                    del st.session_state.area_defects[area_name]
+                if area_name in st.session_state.area_results:
+                    del st.session_state.area_results[area_name]
                 st.rerun()
 
 # Quick guide
@@ -339,16 +364,16 @@ with st.expander("ℹ️ How to Use"):
     1. Create custom area names that match your warehouse layout
     2. Upload photos for each specific area
     3. Click "Analyze [Area Name]" to process the photos
-    4. See defects with visual outlines next to each description
-    5. View defects in the context of the original image
+    4. See results grouped by photo with "No defects" messages when appropriate
+    5. View annotated and original images side by side
     
     **Features:**
-    - Fully customizable area names
-    - Visual defect outlines showing exact locations
-    - Side-by-side image and description view
-    - Concise 1-2 line LLM analysis
-    - Original context viewing for each defect
+    - Defects grouped by photo
+    - "No defects" messages for clean areas
+    - Side-by-side annotated and original images
+    - Visual defect outlines
+    - Concise LLM analysis
     """)
 
 st.markdown("---")
-st.caption("Warehouse Defect Inspection • Custom Areas • Visual Defect Outlines • Concise Analysis")
+st.caption("Warehouse Defect Inspection • Grouped by Photo • Clear No-Defect Messages")
