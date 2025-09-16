@@ -37,13 +37,12 @@ def load_yolo_model(model_path):
     return YOLO(model_path)
 
 model = load_yolo_model(model_file)
-
 # ----------------------------
-# 2. LLM Analysis Functions (Concise - No Causes/Recommendations)
+# 2. LLM Analysis Functions (Concise - Direct Summary)
 # ----------------------------
 def get_llm_concise_analysis(defect_types, area_name):
     """
-    Use LLM to generate concise analysis of the defects in a photo
+    Use LLM to generate direct, concise summary of defects
     """
     # Get API key from Streamlit secrets
     try:
@@ -57,11 +56,11 @@ def get_llm_concise_analysis(defect_types, area_name):
             # Fallback description without LLM
             defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
                                       for defect_type, count in defect_types.items()])
-            return f"Detected {defect_summary}."
+            return defect_summary
     except:
         defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
                                   for defect_type, count in defect_types.items()])
-        return f"Detected {defect_summary}."
+        return defect_summary
     
     try:
         client = OpenAI(
@@ -74,13 +73,9 @@ def get_llm_concise_analysis(defect_types, area_name):
                                       for defect_type, count in defect_types.items()])
         
         prompt = f"""
-        As a structural engineer, provide a concise factual description of these concrete defects:
-        
-        DEFECTS: {defect_description}
-        LOCATION: {area_name}
-        
-        Provide only a factual description of what is visible. Do not include causes, recommendations, or advice.
-        Be specific about the defect types and their characteristics.
+        Concrete defects detected: {defect_description} in {area_name}.
+        Provide a very brief, direct summary of the defects. No introductions, no explanations.
+        Just state the defects concisely.
         """
         
         response = client.chat.completions.create(
@@ -88,32 +83,40 @@ def get_llm_concise_analysis(defect_types, area_name):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a structural engineer providing factual descriptions of concrete defects. Only describe what is visible. Do not include causes, recommendations, or advice. Be concise and factual."
+                    "content": "You are a structural engineer. Provide extremely concise defect summaries. No introductions, no explanations. Just state the facts directly. Maximum 1-2 sentences."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            max_tokens=100,
-            temperature=0.2,
+            max_tokens=50,
+            temperature=0.1,
             top_p=0.8,
             stream=False
         )
         
-        analysis = response.choices[0].message.content
+        analysis = response.choices[0].message.content.strip()
         
-        # Remove any causes/recommendations that might slip through
-        analysis = analysis.split('.')[0] + '.' if '.' in analysis else analysis
-        analysis = analysis.replace('causes', 'shows').replace('recommend', 'exhibits')
-        analysis = analysis.replace('should be', 'is').replace('needs to', 'has')
+        # Clean up any remaining verbose language
+        analysis = analysis.replace("Based on the provided information, ", "")
+        analysis = analysis.replace("I will describe ", "")
+        analysis = analysis.replace("The defects include ", "")
+        analysis = analysis.replace("There are ", "")
+        analysis = analysis.replace("We have detected ", "")
+        
+        # If it's still too long, just use the defect summary
+        if len(analysis.split()) > 15:
+            defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
+                                      for defect_type, count in defect_types.items()])
+            return defect_summary
         
         return analysis
         
     except Exception as e:
         defect_summary = ", ".join([f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
                                   for defect_type, count in defect_types.items()])
-        return f"Detected {defect_summary}."
+        return defect_summary
 
 # ----------------------------
 # 3. Helper Functions
