@@ -316,7 +316,7 @@ if st.session_state.custom_areas:
                                 st.subheader("📝 Additional Comments")
                                 
                                 # Create columns for the button and text area
-                                btn_col, _ = st.columns([2, 3])
+                                btn_col, _ = st.columns([3, 3])
                                 
                                 with btn_col:
                                     if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}", use_container_width=True):
