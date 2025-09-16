@@ -293,17 +293,17 @@ if st.session_state.custom_areas:
                                 use_container_width=True
                             )
                         
-                        with col2:
+                       with col2:
                             # Show defects summary
                             if result['has_defects']:
-                                # Create a natural language summary of defects
+                                # Create a natural language summary of defects (using already mapped names)
                                 defect_summary = ", ".join([
-                                    f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
+                                    f"{count} {defect_type}{'s' if count > 1 else ''}" 
                                     for defect_type, count in result['defect_counts'].items()
                                 ])
                                 
                                 st.write(f"**Defects found:** {defect_summary}")
-                                st.write("**AI Analysis:**", result['analysis'])
+                                st.write("**Summary:**", result['analysis'])
                                 
                                 # Free text box for user comments with AI summary button
                                 st.subheader("📝 Additional Comments")
@@ -356,6 +356,7 @@ if st.session_state.area_results:
             for filename, result in photo_results.items():
                 st.write(f"**Photo:** {filename}")
                 
+        
                 if result['has_defects']:
                     defect_summary = ", ".join([
                         f"{count} {defect_type.replace('_', ' ')}{'s' if count > 1 else ''}" 
@@ -368,10 +369,20 @@ if st.session_state.area_results:
                     user_comment = st.session_state.user_comments[area_name].get(filename, "")
                     if user_comment:
                         st.write(f"**User Comments:** {user_comment}")
-                else:
-                    st.success("✅ No defects detected")
                 
-                st.write("---")
+                # Change to:
+                if result['has_defects']:
+                    defect_summary = ", ".join([
+                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
+                        for defect_type, count in result['defect_counts'].items()
+                    ])
+                    st.write(f"**Defects:** {defect_summary}")
+                    st.write(f"**Summary:** {result['analysis']}")
+                    
+                    # Show user comments if available
+                    user_comment = st.session_state.user_comments[area_name].get(filename, "")
+                    if user_comment:
+                        st.write(f"**User Comments:** {user_comment}")
     
     # Summary statistics
     if total_photos > 0:
