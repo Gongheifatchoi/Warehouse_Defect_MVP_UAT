@@ -12,7 +12,6 @@ import numpy as np
 from collections import Counter
 import base64
 from io import BytesIO
-import pdfkit
 
 # ----------------------------
 # 1. Model setup
@@ -188,8 +187,8 @@ def analyze_image(image, area_name, filename):
     
     return defect_counts, annotated_image, image
 
-def create_pdf_report(project_name, area_results, user_comments):
-    """Create a PDF report of the inspection results"""
+def create_html_report(project_name, area_results, user_comments):
+    """Create an HTML report of the inspection results"""
     html_content = f"""
     <html>
     <head>
@@ -202,7 +201,7 @@ def create_pdf_report(project_name, area_results, user_comments):
             .area-title {{ font-size: 18px; font-weight: bold; margin-bottom: 10px; }}
             .photo-section {{ margin-bottom: 15px; }}
             .defect-summary {{ margin: 5px 0; }}
-            .comments {{ margin: 5px 0; font-style: italic; }}
+            .comments {{ margin: 5px 0; font-style: italic; color: #555; }}
             .page-break {{ page-break-before: always; }}
         </style>
     </head>
@@ -214,41 +213,37 @@ def create_pdf_report(project_name, area_results, user_comments):
     """
     
     for area_name, photos in area_results.items():
-        html_content += f'<div class="area-section">'
-        html_content += f'<div class="area-title">Area: {area_name}</div>'
+        area_has_defects = any(photo_result['has_defects'] for photo_result in photos.values())
         
-        for filename, result in photos.items():
-            if result['has_defects']:
-                defect_summary = ", ".join([
-                    f"{count} {defect_type}{'s' if count > 1 else ''}" 
-                    for defect_type, count in result['defect_counts'].items()
-                ])
-                
-                html_content += f'''
-                <div class="photo-section">
-                    <div class="defect-summary"><strong>Photo:</strong> {filename}</div>
-                    <div class="defect-summary"><strong>Defects:</strong> {defect_summary}</div>
-                    <div class="defect-summary"><strong>Summary:</strong> {result['analysis']}</div>
-                '''
-                
-                # Add user comments if available
-                user_comment = user_comments.get(area_name, {}).get(filename, "")
-                if user_comment:
-                    html_content += f'<div class="comments"><strong>Comments:</strong> {user_comment}</div>'
-                
-                html_content += '</div>'
-        
-        html_content += '</div>'
+        if area_has_defects:
+            html_content += f'<div class="area-section">'
+            html_content += f'<div class="area-title">Area: {area_name}</div>'
+            
+            for filename, result in photos.items():
+                if result['has_defects']:
+                    defect_summary = ", ".join([
+                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
+                        for defect_type, count in result['defect_counts'].items()
+                    ])
+                    
+                    html_content += f'''
+                    <div class="photo-section">
+                        <div class="defect-summary"><strong>Photo:</strong> {filename}</div>
+                        <div class="defect-summary"><strong>Defects:</strong> {defect_summary}</div>
+                        <div class="defect-summary"><strong>Summary:</strong> {result['analysis']}</div>
+                    '''
+                    
+                    # Add user comments if available
+                    user_comment = user_comments.get(area_name, {}).get(filename, "")
+                    if user_comment:
+                        html_content += f'<div class="comments"><strong>Comments:</strong> {user_comment}</div>'
+                    
+                    html_content += '</div>'
+            
+            html_content += '</div>'
     
     html_content += "</body></html>"
-    
-    # Convert HTML to PDF
-    try:
-        pdf = pdfkit.from_string(html_content, False)
-        return pdf
-    except:
-        # Fallback: return HTML content if PDF generation fails
-        return html_content.encode()
+    return html_content
 
 # ----------------------------
 # 4. Streamlit UI
@@ -341,6 +336,52 @@ if st.session_state.current_project:
                 # Store uploaded files for this area
                 if uploaded_files:
                     project['areas'][area_name] = uploaded_files
+                
+                # Show individual photo analysis with "Use AI Summary" button
+                if area_name in project['results'] and project['results'][area_name]:
+                    st.subheader("📸 Photo Analysis")
+                    for filename, result in project['results'][area_name].items():
+                        with st.expander(f"Photo: {filename}", expanded=False):
+                            col1, col2 = st.columns([1, 1])
+                            
+                            with col1:
+                                st.image(result['annotated_image'], caption="Annotated Image", use_container_width=True)
+                            
+                            with col2:
+                                if result['has_defects']:
+                                    defect_summary = ", ".join([
+                                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
+                                        for defect_type, count in result['defect_counts'].items()
+                                    ])
+                                    st.write(f"**Defects found:** {defect_summary}")
+                                    st.write("**Summary:**", result['analysis'])
+                                    
+                                    # "Use AI Summary" button
+                                    st.subheader("📝 Additional Comments")
+                                    
+                                    # Create columns for the button and text area
+                                    btn_col, _ = st.columns([2, 3])
+                                    
+                                    with btn_col:
+                                        if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}", use_container_width=True):
+                                            # Populate text area with AI analysis
+                                            project['comments'][area_name][filename] = result['analysis']
+                                            st.rerun()
+                                    
+                                    # User comments text area
+                                    comment_key = f"comment_{area_name}_{filename}"
+                                    user_comment = st.text_area(
+                                        "Add your observations:",
+                                        value=project['comments'][area_name].get(filename, ""),
+                                        height=100,
+                                        key=comment_key
+                                    )
+                                    
+                                    # Store user comment
+                                    project['comments'][area_name][filename] = user_comment
+                                    
+                                else:
+                                    st.success("✅ No defects detected in this photo")
     
     # Single "Analyze All Areas" button
     if project['areas'] and any(project['areas'].values()):
@@ -439,36 +480,24 @@ if st.session_state.current_project:
                                 user_comment = project['comments'][area_name].get(filename, "")
                                 if user_comment:
                                     st.write(f"**Comments:** {user_comment}")
-                                
-                                # Comment input
-                                comment_key = f"comment_{area_name}_{filename}"
-                                new_comment = st.text_area(
-                                    "Add comments:",
-                                    value=user_comment,
-                                    height=60,
-                                    key=comment_key,
-                                    label_visibility="collapsed"
-                                )
-                                project['comments'][area_name][filename] = new_comment
                             
                             st.write("---")
         
-        # PDF Export
+        # HTML Export (replacing PDF)
         st.subheader("📄 Export Report")
-        if st.button("🖨️ Generate PDF Report", use_container_width=True):
-            pdf_data = create_pdf_report(
-                st.session_state.current_project,
-                project['results'],
-                project['comments']
-            )
-            
-            st.download_button(
-                label="📥 Download PDF Report",
-                data=pdf_data,
-                file_name=f"{st.session_state.current_project}_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+        html_report = create_html_report(
+            st.session_state.current_project,
+            project['results'],
+            project['comments']
+        )
+        
+        st.download_button(
+            label="📥 Download HTML Report",
+            data=html_report,
+            file_name=f"{st.session_state.current_project}_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+            mime="text/html",
+            use_container_width=True
+        )
 
 else:
     st.info("👆 Create a new project to get started with warehouse inspection.")
@@ -482,13 +511,14 @@ with st.expander("ℹ️ How to Use"):
     3. Upload photos for each area
     4. Click "Analyze All Areas" to process all photos
     5. Review results in the "All Inspection Results" section
-    6. Generate PDF reports for documentation
+    6. Download HTML reports for documentation
     
     **Features:**
     - Project-based organization
     - Single "Analyze All Areas" button
+    - "Use AI Summary" button for quick comments
     - Thumbnail view of defective photos
-    - PDF report generation
+    - HTML report generation
     - Running count of defects and affected areas
     """)
 
