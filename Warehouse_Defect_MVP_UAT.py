@@ -10,6 +10,9 @@ from openai import OpenAI
 from datetime import datetime
 import numpy as np
 from collections import Counter
+import base64
+from io import BytesIO
+import pdfkit
 
 # ----------------------------
 # 1. Model setup
@@ -185,231 +188,309 @@ def analyze_image(image, area_name, filename):
     
     return defect_counts, annotated_image, image
 
+def create_pdf_report(project_name, area_results, user_comments):
+    """Create a PDF report of the inspection results"""
+    html_content = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            .header {{ text-align: center; margin-bottom: 30px; }}
+            .project-name {{ font-size: 24px; font-weight: bold; }}
+            .date {{ font-size: 14px; color: #666; }}
+            .area-section {{ margin-bottom: 25px; page-break-inside: avoid; }}
+            .area-title {{ font-size: 18px; font-weight: bold; margin-bottom: 10px; }}
+            .photo-section {{ margin-bottom: 15px; }}
+            .defect-summary {{ margin: 5px 0; }}
+            .comments {{ margin: 5px 0; font-style: italic; }}
+            .page-break {{ page-break-before: always; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="project-name">{project_name}</div>
+            <div class="date">Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+        </div>
+    """
+    
+    for area_name, photos in area_results.items():
+        html_content += f'<div class="area-section">'
+        html_content += f'<div class="area-title">Area: {area_name}</div>'
+        
+        for filename, result in photos.items():
+            if result['has_defects']:
+                defect_summary = ", ".join([
+                    f"{count} {defect_type}{'s' if count > 1 else ''}" 
+                    for defect_type, count in result['defect_counts'].items()
+                ])
+                
+                html_content += f'''
+                <div class="photo-section">
+                    <div class="defect-summary"><strong>Photo:</strong> {filename}</div>
+                    <div class="defect-summary"><strong>Defects:</strong> {defect_summary}</div>
+                    <div class="defect-summary"><strong>Summary:</strong> {result['analysis']}</div>
+                '''
+                
+                # Add user comments if available
+                user_comment = user_comments.get(area_name, {}).get(filename, "")
+                if user_comment:
+                    html_content += f'<div class="comments"><strong>Comments:</strong> {user_comment}</div>'
+                
+                html_content += '</div>'
+        
+        html_content += '</div>'
+    
+    html_content += "</body></html>"
+    
+    # Convert HTML to PDF
+    try:
+        pdf = pdfkit.from_string(html_content, False)
+        return pdf
+    except:
+        # Fallback: return HTML content if PDF generation fails
+        return html_content.encode()
+
 # ----------------------------
 # 4. Streamlit UI
 # ----------------------------
 st.title("🏗️ Warehouse Defect Inspection")
-st.write("Create custom areas and upload photos to analyze defects with bounding boxes.")
-
-# Check API status
-try:
-    has_api_key = any(key in st.secrets for key in ['HUGGINGFACEHUB_API_TOKEN', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'])
-    if not has_api_key:
-        st.warning("LLM analysis requires Hugging Face API key for optimal results.")
-    else:
-        st.success("LLM analysis enabled. Ready for defect reporting.")
-except:
-    st.warning("Secrets configuration not accessible.")
+st.write("Manage projects and analyze defects across multiple warehouse areas.")
 
 # Initialize session state
-if 'custom_areas' not in st.session_state:
-    st.session_state.custom_areas = {}
-if 'area_results' not in st.session_state:
-    st.session_state.area_results = {}
-if 'user_comments' not in st.session_state:
-    st.session_state.user_comments = {}
+if 'projects' not in st.session_state:
+    st.session_state.projects = {}
+if 'current_project' not in st.session_state:
+    st.session_state.current_project = None
+if 'project_data' not in st.session_state:
+    st.session_state.project_data = {}
 
-# Custom area creation
-st.subheader("📁 Create Custom Warehouse Areas")
-
-col1, col2 = st.columns([2, 1])
-with col1:
-    new_area_name = st.text_input("New Area Name:", placeholder="e.g., North Wall near Entrance")
-with col2:
-    if st.button("➕ Add Area") and new_area_name:
-        if new_area_name not in st.session_state.custom_areas:
-            st.session_state.custom_areas[new_area_name] = []
-            st.session_state.area_results[new_area_name] = {}
-            st.session_state.user_comments[new_area_name] = {}
-            st.success(f"Added area: {new_area_name}")
+# Project Management Sidebar
+with st.sidebar:
+    st.header("📁 Project Management")
+    
+    # Create new project
+    new_project_name = st.text_input("New Project Name:", placeholder="e.g., Warehouse A Inspection")
+    if st.button("➕ Create New Project") and new_project_name:
+        if new_project_name not in st.session_state.projects:
+            st.session_state.projects[new_project_name] = {
+                'created_date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                'areas': {},
+                'results': {},
+                'comments': {}
+            }
+            st.session_state.current_project = new_project_name
+            st.success(f"Created project: {new_project_name}")
         else:
-            st.warning("Area already exists!")
-
-# Show existing custom areas
-if st.session_state.custom_areas:
-    st.subheader("📋 Your Custom Areas")
+            st.warning("Project name already exists!")
     
-    # Create tabs for each custom area
-    area_tabs = st.tabs([f"📍 {area}" for area in st.session_state.custom_areas.keys()])
-    
-    for i, (area_name, area_photos) in enumerate(st.session_state.custom_areas.items()):
-        with area_tabs[i]:
-            st.subheader(f"{area_name}")
-            
-            # File upload for this specific area
-            uploaded_files = st.file_uploader(
-                f"Upload photos for {area_name}",
-                type=["jpg", "jpeg", "png"],
-                accept_multiple_files=True,
-                key=f"uploader_{area_name}"
-            )
-            
-            # Store uploaded files for this area
-            if uploaded_files:
-                st.session_state.custom_areas[area_name] = uploaded_files
-            
-            # Process button for this area
-            if st.session_state.custom_areas[area_name] and st.button(f"Analyze {area_name}", key=f"btn_{area_name}"):
-                area_photo_results = {}
-                
-                for j, uploaded_file in enumerate(st.session_state.custom_areas[area_name]):
-                    with st.spinner(f"Processing image {j+1}/{len(st.session_state.custom_areas[area_name])}..."):
-                        image = Image.open(uploaded_file)
-                        defect_counts, annotated_image, original_image = analyze_image(image, area_name, uploaded_file.name)
-                        
-                        # Get LLM analysis for the defects in this photo
-                        analysis = get_llm_concise_analysis(defect_counts, area_name)
-                        
-                        # Store results by photo
-                        area_photo_results[uploaded_file.name] = {
-                            'defect_counts': defect_counts,
-                            'analysis': analysis,
-                            'annotated_image': annotated_image,
-                            'original_image': original_image,
-                            'has_defects': sum(defect_counts.values()) > 0
-                        }
-                        
-                        # Initialize user comments
-                        if area_name not in st.session_state.user_comments:
-                            st.session_state.user_comments[area_name] = {}
-                        st.session_state.user_comments[area_name][uploaded_file.name] = ""
-                
-                # Store results for this area
-                st.session_state.area_results[area_name] = area_photo_results
-                
-                # Show summary
-                total_defects = sum(sum(result['defect_counts'].values()) for result in area_photo_results.values())
-                st.success(f"Analysis complete for {area_name}! Found {total_defects} defects across {len(area_photo_results)} photos.")
+    # Project selection
+    if st.session_state.projects:
+        project_names = list(st.session_state.projects.keys())
+        selected_project = st.selectbox(
+            "Select Project:",
+            project_names,
+            index=project_names.index(st.session_state.current_project) if st.session_state.current_project else 0
+        )
+        
+        if selected_project != st.session_state.current_project:
+            st.session_state.current_project = selected_project
+            st.rerun()
 
-            # Show results grouped by photo
-            if area_name in st.session_state.area_results and st.session_state.area_results[area_name]:
-                st.subheader(f"Photo Results for {area_name}")
+# Main content based on selected project
+if st.session_state.current_project:
+    project = st.session_state.projects[st.session_state.current_project]
+    
+    st.header(f"Project: {st.session_state.current_project}")
+    st.caption(f"Created: {project['created_date']}")
+    
+    # Custom area creation
+    st.subheader("📁 Create Warehouse Areas")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        new_area_name = st.text_input("New Area Name:", placeholder="e.g., North Wall near Entrance", key="new_area")
+    with col2:
+        if st.button("➕ Add Area", key="add_area") and new_area_name:
+            if new_area_name not in project['areas']:
+                project['areas'][new_area_name] = []
+                project['results'][new_area_name] = {}
+                project['comments'][new_area_name] = {}
+                st.success(f"Added area: {new_area_name}")
+            else:
+                st.warning("Area already exists!")
+    
+    # Show existing areas and file uploads
+    if project['areas']:
+        st.subheader("📋 Warehouse Areas")
+        
+        # Create tabs for each area
+        area_tabs = st.tabs([f"📍 {area}" for area in project['areas'].keys()])
+        
+        for i, (area_name, area_photos) in enumerate(project['areas'].items()):
+            with area_tabs[i]:
+                st.subheader(f"{area_name}")
                 
-                photo_results = st.session_state.area_results[area_name]
+                # File upload for this specific area
+                uploaded_files = st.file_uploader(
+                    f"Upload photos for {area_name}",
+                    type=["jpg", "jpeg", "png"],
+                    accept_multiple_files=True,
+                    key=f"uploader_{area_name}"
+                )
                 
-                for filename, result in photo_results.items():
-                    with st.expander(f"📷 {filename}", expanded=True):
-                        # Create two columns: image on left, analysis on right
-                        col1, col2 = st.columns([1, 1])
+                # Store uploaded files for this area
+                if uploaded_files:
+                    project['areas'][area_name] = uploaded_files
+    
+    # Single "Analyze All Areas" button
+    if project['areas'] and any(project['areas'].values()):
+        if st.button("🔍 Analyze All Areas", type="primary", use_container_width=True):
+            with st.spinner("Analyzing all areas..."):
+                for area_name, uploaded_files in project['areas'].items():
+                    if uploaded_files:
+                        area_photo_results = {}
                         
-                        with col1:
-                            # Show the annotated image with bounding boxes
-                            st.image(
-                                result['annotated_image'],
-                                caption="Annotated Image with Defect Outlines",
-                                use_container_width=True
-                            )
+                        for j, uploaded_file in enumerate(uploaded_files):
+                            with st.spinner(f"Processing {area_name} - image {j+1}/{len(uploaded_files)}..."):
+                                image = Image.open(uploaded_file)
+                                defect_counts, annotated_image, original_image = analyze_image(image, area_name, uploaded_file.name)
+                                
+                                # Get LLM analysis for the defects in this photo
+                                analysis = get_llm_concise_analysis(defect_counts, area_name)
+                                
+                                # Store results by photo
+                                area_photo_results[uploaded_file.name] = {
+                                    'defect_counts': defect_counts,
+                                    'analysis': analysis,
+                                    'annotated_image': annotated_image,
+                                    'original_image': original_image,
+                                    'has_defects': sum(defect_counts.values()) > 0
+                                }
+                                
+                                # Initialize user comments
+                                if area_name not in project['comments']:
+                                    project['comments'][area_name] = {}
+                                project['comments'][area_name][uploaded_file.name] = ""
                         
-                        with col2:
-                            # Show defects summary
-                            if result['has_defects']:
-                                # Create a natural language summary of defects
+                        # Store results for this area
+                        project['results'][area_name] = area_photo_results
+                
+                st.success("Analysis complete for all areas!")
+    
+    # All Inspection Results Section (Only show photos with defects)
+    if any(any(photo_result['has_defects'] for photo_result in area_results.values()) 
+           for area_results in project['results'].values() if area_results):
+        
+        st.header("📋 All Inspection Results (Defects Only)")
+        
+        total_defects = 0
+        total_photos_with_defects = 0
+        areas_with_defects = 0
+        
+        # Calculate totals
+        for area_name, area_results in project['results'].items():
+            area_has_defects = False
+            for result in area_results.values():
+                if result['has_defects']:
+                    total_defects += sum(result['defect_counts'].values())
+                    total_photos_with_defects += 1
+                    area_has_defects = True
+            if area_has_defects:
+                areas_with_defects += 1
+        
+        # Summary metrics
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Areas with Defects", areas_with_defects)
+        col2.metric("Photos with Defects", total_photos_with_defects)
+        col3.metric("Total Defects", total_defects)
+        
+        # Display results with thumbnails
+        for area_name, area_results in project['results'].items():
+            area_has_defects = any(result['has_defects'] for result in area_results.values())
+            
+            if area_has_defects:
+                with st.expander(f"📍 {area_name}", expanded=True):
+                    photo_count = 0
+                    
+                    for filename, result in area_results.items():
+                        if result['has_defects']:
+                            photo_count += 1
+                            st.write(f"**Photo {photo_count}:** {filename}")
+                            
+                            # Create thumbnail and text layout
+                            col1, col2 = st.columns([1, 3])
+                            
+                            with col1:
+                                # Create thumbnail
+                                thumbnail = result['annotated_image'].copy()
+                                thumbnail.thumbnail((200, 200))
+                                st.image(thumbnail, use_container_width=True)
+                            
+                            with col2:
                                 defect_summary = ", ".join([
                                     f"{count} {defect_type}{'s' if count > 1 else ''}" 
                                     for defect_type, count in result['defect_counts'].items()
                                 ])
                                 
-                                st.write(f"**Defects found:** {defect_summary}")
-                                st.write("**Summary:**", result['analysis'])
+                                st.write(f"**Defects:** {defect_summary}")
+                                st.write(f"**Summary:** {result['analysis']}")
                                 
-                                # Free text box for user comments with AI summary button
-                                st.subheader("📝 Additional Comments")
+                                # User comments
+                                user_comment = project['comments'][area_name].get(filename, "")
+                                if user_comment:
+                                    st.write(f"**Comments:** {user_comment}")
                                 
-                                # Create columns for the button and text area
-                                btn_col, _ = st.columns([2, 3])
-                                
-                                with btn_col:
-                                    if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}", use_container_width=True):
-                                        # Populate text area with AI analysis
-                                        st.session_state.user_comments[area_name][filename] = result['analysis']
-                                        st.rerun()
-                                
-                                # User comments text area
+                                # Comment input
                                 comment_key = f"comment_{area_name}_{filename}"
-                                user_comment = st.text_area(
-                                    "Add your observations:",
-                                    value=st.session_state.user_comments[area_name].get(filename, ""),
-                                    height=100,
-                                    key=comment_key
+                                new_comment = st.text_area(
+                                    "Add comments:",
+                                    value=user_comment,
+                                    height=60,
+                                    key=comment_key,
+                                    label_visibility="collapsed"
                                 )
-                                
-                                # Store user comment
-                                st.session_state.user_comments[area_name][filename] = user_comment
-                                
-                            else:
-                                st.success("✅ No defects detected in this photo")
-                                st.info("The concrete surface appears to be in good condition.")
-
-# Consolidated view of all areas with photos
-if st.session_state.area_results:
-    st.subheader("📋 All Inspection Results")
-    
-    total_photos = 0
-    total_defects = 0
-    areas_with_defects = 0
-    
-    for area_name, photo_results in st.session_state.area_results.items():
-        total_photos += len(photo_results)
-        area_defect_count = 0
+                                project['comments'][area_name][filename] = new_comment
+                            
+                            st.write("---")
         
-        for filename, result in photo_results.items():
-            area_defect_count += sum(result['defect_counts'].values())
-            total_defects += sum(result['defect_counts'].values())
-        
-        if area_defect_count > 0:
-            areas_with_defects += 1
-        
-        with st.expander(f"📍 {area_name} - {len(photo_results)} photos", expanded=False):
-            for filename, result in photo_results.items():
-                st.write(f"**Photo:** {filename}")
-                
-                if result['has_defects']:
-                    defect_summary = ", ".join([
-                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
-                        for defect_type, count in result['defect_counts'].items()
-                    ])
-                    st.write(f"**Defects:** {defect_summary}")
-                    st.write(f"**Summary:** {result['analysis']}")
-                    
-                    # Show user comments if available
-                    user_comment = st.session_state.user_comments[area_name].get(filename, "")
-                    if user_comment:
-                        st.write(f"**User Comments:** {user_comment}")
-                else:
-                    st.success("✅ No defects detected")
-                
-                st.write("---")
-    
-    # Summary statistics
-    if total_photos > 0:
-        st.subheader("📊 Summary")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        col1.metric("Total Areas", len(st.session_state.area_results))
-        col2.metric("Total Photos", total_photos)
-        col3.metric("Total Defects", total_defects)
-        col4.metric("Areas with Defects", areas_with_defects)
+        # PDF Export
+        st.subheader("📄 Export Report")
+        if st.button("🖨️ Generate PDF Report", use_container_width=True):
+            pdf_data = create_pdf_report(
+                st.session_state.current_project,
+                project['results'],
+                project['comments']
+            )
+            
+            st.download_button(
+                label="📥 Download PDF Report",
+                data=pdf_data,
+                file_name=f"{st.session_state.current_project}_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
 else:
-    st.info("👆 Create custom areas above to start your warehouse inspection.")
+    st.info("👆 Create a new project to get started with warehouse inspection.")
 
 # Quick guide
 with st.expander("ℹ️ How to Use"):
     st.write("""
     **Workflow:**
-    1. Create custom area names that match your warehouse layout
-    2. Upload photos for each specific area
-    3. Click "Analyze [Area Name]" to process the photos
-    4. View annotated images with defect bounding boxes
-    5. Add your own comments or use AI-generated summaries
+    1. Create a new project with a descriptive name
+    2. Add warehouse areas to the project
+    3. Upload photos for each area
+    4. Click "Analyze All Areas" to process all photos
+    5. Review results in the "All Inspection Results" section
+    6. Generate PDF reports for documentation
     
     **Features:**
-    - Bounding boxes around all detected defects
-    - Image on left, analysis on right layout
-    - Direct, concise defect summaries
-    - Free text box for user comments
-    - "Use AI Summary" button to quickly populate comments
+    - Project-based organization
+    - Single "Analyze All Areas" button
+    - Thumbnail view of defective photos
+    - PDF report generation
+    - Running count of defects and affected areas
     """)
 
 st.markdown("---")
-st.caption("Warehouse Defect Inspection • Visual Defect Detection • Professional Analysis")
+st.caption("Warehouse Defect Inspection • Project Management • Professional Reporting")
