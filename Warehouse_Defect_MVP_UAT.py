@@ -87,12 +87,12 @@ def get_llm_concise_analysis(defect_types, area_name):
             api_key = st.secrets['HF_TOKEN']
         else:
             # Fallback description without LLM
-            defect_summary = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
-                                      for defect_name, count in mapped_defect_types.items()])
+            defect_summary = ", ".join([f"{defect_name}" 
+                                      for defect_name, count in mapped_defect_types.items() for _ in range(count)])
             return defect_summary
     except:
-        defect_summary = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
-                                  for defect_name, count in mapped_defect_types.items()])
+        defect_summary = ", ".join([f"{defect_name}" 
+                                  for defect_name, count in mapped_defect_types.items() for _ in range(count)])
         return defect_summary
     
     try:
@@ -102,13 +102,13 @@ def get_llm_concise_analysis(defect_types, area_name):
         )
         
         # Create a natural language description of the defects
-        defect_description = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
-                                      for defect_name, count in mapped_defect_types.items()])
+        defect_description = ", ".join([f"{defect_name}" 
+                                      for defect_name, count in mapped_defect_types.items() for _ in range(count)])
         
         prompt = f"""
         Concrete defects: {defect_description} in {area_name}.
         Provide a very brief summary. Just state the defects concisely without explanations.
-        Example: "3 hairline cracks detected in north wall"
+        Example: "hairline cracks detected in north wall"
         """
         
         response = client.chat.completions.create(
@@ -116,7 +116,7 @@ def get_llm_concise_analysis(defect_types, area_name):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a structural engineer. Provide extremely concise defect summaries. No introductions, no explanations. Just state the facts directly. Maximum 1 sentence. Use simple language like 'X cracks detected in Y location'."
+                    "content": "You are a structural engineer. Provide extremely concise defect summaries. No introductions, no explanations. Just state the facts directly. Maximum 1 sentence. Use simple language like 'cracks detected in Y location'."
                 },
                 {
                     "role": "user",
@@ -142,8 +142,8 @@ def get_llm_concise_analysis(defect_types, area_name):
         return analysis
         
     except Exception as e:
-        defect_summary = ", ".join([f"{count} {defect_name}{'s' if count > 1 else ''}" 
-                                  for defect_name, count in mapped_defect_types.items()])
+        defect_summary = ", ".join([f"{defect_name}" 
+                                  for defect_name, count in mapped_defect_types.items() for _ in range(count)])
         return defect_summary
 
 # ----------------------------
@@ -246,10 +246,11 @@ def create_html_report(project_name, area_results, user_comments):
             for filename, result in photos.items():
                 if result['has_defects']:
                     row_count += 1
-                    defect_summary = ", ".join([
-                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
-                        for defect_type, count in result['defect_counts'].items()
-                    ])
+                    # List each defect individually without count
+                    defect_list = []
+                    for defect_type, count in result['defect_counts'].items():
+                        defect_list.extend([defect_type] * count)
+                    defect_summary = ", ".join(defect_list)
                     
                     # Convert annotated image to base64 for HTML embedding
                     buffered = BytesIO()
@@ -294,8 +295,8 @@ if 'current_project' not in st.session_state:
     st.session_state.current_project = None
 if 'project_data' not in st.session_state:
     st.session_state.project_data = {}
-if 'uploaded_files_visible' not in st.session_state:
-    st.session_state.uploaded_files_visible = {}
+if 'current_area_index' not in st.session_state:
+    st.session_state.current_area_index = 0
 
 # Project Management Sidebar
 with st.sidebar:
@@ -327,6 +328,7 @@ with st.sidebar:
         
         if selected_project != st.session_state.current_project:
             st.session_state.current_project = selected_project
+            st.session_state.current_area_index = 0
             st.rerun()
 
 # Main content based on selected project
@@ -348,7 +350,6 @@ if st.session_state.current_project:
                 project['areas'][new_area_name] = []
                 project['results'][new_area_name] = {}
                 project['comments'][new_area_name] = {}
-                st.session_state.uploaded_files_visible[new_area_name] = False
                 st.success(f"Added area: {new_area_name}")
             else:
                 st.warning("Area already exists!")
@@ -357,43 +358,40 @@ if st.session_state.current_project:
     if project['areas']:
         st.subheader("📋 Warehouse Areas")
         
-        # Create tabs for each area
-        area_tabs = st.tabs([f"📍 {area}" for area in project['areas'].keys()])
+        area_names = list(project['areas'].keys())
         
-        for i, (area_name, area_photos) in enumerate(project['areas'].items()):
-            with area_tabs[i]:
-                st.subheader(f"{area_name}")
-                
-                # File upload for this specific area
-                uploaded_files = st.file_uploader(
-                    f"Upload photos for {area_name}",
-                    type=["jpg", "jpeg", "png"],
-                    accept_multiple_files=True,
-                    key=f"uploader_{area_name}"
-                )
-                
-                # Store uploaded files for this area
-                if uploaded_files:
-                    project['areas'][area_name] = uploaded_files
-                
-                # Show uploaded files list (minimized by default)
-                if uploaded_files:
-                    # Initialize visibility state if not exists
-                    if area_name not in st.session_state.uploaded_files_visible:
-                        st.session_state.uploaded_files_visible[area_name] = False
-                    
-                    # Toggle button for uploaded files list
-                    if st.button(
-                        f"{'▼' if st.session_state.uploaded_files_visible[area_name] else '►'} Show Uploaded Files ({len(uploaded_files)})",
-                        key=f"toggle_{area_name}"
-                    ):
-                        st.session_state.uploaded_files_visible[area_name] = not st.session_state.uploaded_files_visible[area_name]
-                    
-                    # Show uploaded files list if expanded
-                    if st.session_state.uploaded_files_visible[area_name]:
-                        st.write("**Uploaded Files:**")
-                        for file in uploaded_files:
-                            st.write(f"- {file.name}")
+        # Navigation buttons
+        if area_names:
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+            
+            with nav_col1:
+                if st.button("◀ Previous", disabled=st.session_state.current_area_index == 0):
+                    st.session_state.current_area_index = (st.session_state.current_area_index - 1) % len(area_names)
+                    st.rerun()
+            
+            with nav_col2:
+                st.markdown(f"<h4 style='text-align: center;'>📍 {area_names[st.session_state.current_area_index]}</h4>", 
+                           unsafe_allow_html=True)
+            
+            with nav_col3:
+                if st.button("Next ▶", disabled=st.session_state.current_area_index == len(area_names) - 1):
+                    st.session_state.current_area_index = (st.session_state.current_area_index + 1) % len(area_names)
+                    st.rerun()
+            
+            # Current area content
+            area_name = area_names[st.session_state.current_area_index]
+            
+            # File upload for this specific area
+            uploaded_files = st.file_uploader(
+                f"Upload photos for {area_name}",
+                type=["jpg", "jpeg", "png"],
+                accept_multiple_files=True,
+                key=f"uploader_{area_name}"
+            )
+            
+            # Store uploaded files for this area
+            if uploaded_files:
+                project['areas'][area_name] = uploaded_files
     
     # Single "Analyze All Areas" button
     if project['areas'] and any(project['areas'].values()):
@@ -437,7 +435,6 @@ if st.session_state.current_project:
         st.header("📋 All Inspection Results (Defects Only)")
         
         total_defects = 0
-        total_photos_with_defects = 0
         areas_with_defects = 0
         
         # Calculate totals
@@ -446,16 +443,14 @@ if st.session_state.current_project:
             for result in area_results.values():
                 if result['has_defects']:
                     total_defects += sum(result['defect_counts'].values())
-                    total_photos_with_defects += 1
                     area_has_defects = True
             if area_has_defects:
                 areas_with_defects += 1
         
         # Summary metrics
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         col1.metric("Areas with Defects", areas_with_defects)
-        col2.metric("Photos with Defects", total_photos_with_defects)
-        col3.metric("Total Defects", total_defects)
+        col2.metric("Total Defects", total_defects)
         
         # Display results with 3 columns: row number, comment, thumbnail
         for area_name, area_results in project['results'].items():
@@ -479,10 +474,11 @@ if st.session_state.current_project:
                             
                             with col2:
                                 # Defect description and comments (3 times wider)
-                                defect_summary = ", ".join([
-                                    f"{count} {defect_type}{'s' if count > 1 else ''}" 
-                                    for defect_type, count in result['defect_counts'].items()
-                                ])
+                                # List each defect individually without count
+                                defect_list = []
+                                for defect_type, count in result['defect_counts'].items():
+                                    defect_list.extend([defect_type] * count)
+                                defect_summary = ", ".join(defect_list)
                                 
                                 st.write(f"**Defects:** {defect_summary}")
                                 st.write(f"**Summary:** {result['analysis']}")
@@ -551,6 +547,7 @@ with st.expander("ℹ️ How to Use"):
     - HTML report generation with 3 columns
     - Running count of defects and affected areas
     - Detailed defect descriptions (hairline crack, spalling, etc.)
+    - Navigation buttons to move between areas
     """)
 
 st.markdown("---")
