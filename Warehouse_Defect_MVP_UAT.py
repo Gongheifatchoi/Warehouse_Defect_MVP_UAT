@@ -203,8 +203,10 @@ def create_html_report(project_name, area_results, user_comments):
             .photo-thumbnail {{ flex: 1; max-width: 200px; margin-right: 20px; }}
             .photo-thumbnail img {{ max-width: 100%; height: auto; }}
             .photo-details {{ flex: 3; }}
+            .photo-comments {{ flex: 2; margin-left: 20px; font-style: italic; color: #555; }}
             .defect-summary {{ margin: 5px 0; }}
-            .comments {{ margin: 5px 0; font-style: italic; color: #555; }}
+            .comments {{ margin: 5px 0; }}
+            .row-number {{ font-weight: bold; margin-bottom: 10px; }}
             .page-break {{ page-break-before: always; }}
         </style>
     </head>
@@ -222,8 +224,10 @@ def create_html_report(project_name, area_results, user_comments):
             html_content += f'<div class="area-section">'
             html_content += f'<div class="area-title">Area: {area_name}</div>'
             
+            photo_count = 0
             for filename, result in photos.items():
                 if result['has_defects']:
+                    photo_count += 1
                     defect_summary = ", ".join([
                         f"{count} {defect_type}{'s' if count > 1 else ''}" 
                         for defect_type, count in result['defect_counts'].items()
@@ -234,22 +238,24 @@ def create_html_report(project_name, area_results, user_comments):
                     result['annotated_image'].save(buffered, format="JPEG")
                     img_str = base64.b64encode(buffered.getvalue()).decode()
                     
+                    # Get user comments
+                    user_comment = user_comments.get(area_name, {}).get(filename, "")
+                    
                     html_content += f'''
                     <div class="photo-container">
                         <div class="photo-thumbnail">
                             <img src="data:image/jpeg;base64,{img_str}" alt="Annotated Image">
                         </div>
                         <div class="photo-details">
+                            <div class="row-number">#{photo_count}</div>
                             <div class="defect-summary"><strong>Defects:</strong> {defect_summary}</div>
                             <div class="defect-summary"><strong>Summary:</strong> {result['analysis']}</div>
+                        </div>
+                        <div class="photo-comments">
+                            <div class="comments"><strong>Comments:</strong> {user_comment}</div>
+                        </div>
+                    </div>
                     '''
-                    
-                    # Add user comments if available
-                    user_comment = user_comments.get(area_name, {}).get(filename, "")
-                    if user_comment:
-                        html_content += f'<div class="comments"><strong>Comments:</strong> {user_comment}</div>'
-                    
-                    html_content += '</div></div>'
             
             html_content += '</div>'
     
@@ -471,8 +477,8 @@ if st.session_state.current_project:
                         if result['has_defects']:
                             photo_count += 1
                             
-                            # Create three columns for the layout
-                            col1, col2, col3 = st.columns([1, 2, 2])
+                            # Create four columns for the layout
+                            col1, col2, col3, col4 = st.columns([1, 2, 2, 2])
                             
                             with col1:
                                 # Row number
@@ -492,11 +498,25 @@ if st.session_state.current_project:
                                 
                                 st.write(f"**Defects:** {defect_summary}")
                                 st.write(f"**Summary:** {result['analysis']}")
+                            
+                            with col4:
+                                # "Use AI Summary" button
+                                if st.button("📋 Use AI Summary", key=f"results_ai_btn_{area_name}_{filename}", use_container_width=True):
+                                    # Populate text area with AI analysis
+                                    project['comments'][area_name][filename] = result['analysis']
+                                    st.rerun()
                                 
-                                # User comments
-                                user_comment = project['comments'][area_name].get(filename, "")
-                                if user_comment:
-                                    st.write(f"**Comments:** {user_comment}")
+                                # User comments text area
+                                comment_key = f"results_comment_{area_name}_{filename}"
+                                user_comment = st.text_area(
+                                    "Comments:",
+                                    value=project['comments'][area_name].get(filename, ""),
+                                    height=100,
+                                    key=comment_key
+                                )
+                                
+                                # Store user comment
+                                project['comments'][area_name][filename] = user_comment
                             
                             st.write("---")
         
