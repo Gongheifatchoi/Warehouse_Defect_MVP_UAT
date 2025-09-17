@@ -45,7 +45,7 @@ model = load_yolo_model(model_file)
 def map_defect_name(defect_type):
     """Map numeric or unclear defect names to meaningful descriptions"""
     defect_mapping = {
-        "0": "crack",
+        "0": "hairline crack",
         "zero-clearance joint": "crack",
         "00": "hairline crack", 
         "1": "spalling",
@@ -57,7 +57,7 @@ def map_defect_name(defect_type):
         "7": "discoloration",
         "8": "honeycombing",
         "9": "void",
-        "crack": "crack",
+        "crack": "hairline crack",
         "hairline_crack": "hairline crack",
         "medium_crack": "medium crack",
         "wide_crack": "wide crack",
@@ -188,7 +188,7 @@ def analyze_image(image, area_name, filename):
     return defect_counts, annotated_image, image
 
 def create_html_report(project_name, area_results, user_comments):
-    """Create an HTML report of the inspection results"""
+    """Create an HTML report of the inspection results with 3 columns"""
     html_content = f"""
     <html>
     <head>
@@ -199,14 +199,15 @@ def create_html_report(project_name, area_results, user_comments):
             .date {{ font-size: 14px; color: #666; }}
             .area-section {{ margin-bottom: 25px; page-break-inside: avoid; }}
             .area-title {{ font-size: 18px; font-weight: bold; margin-bottom: 10px; }}
-            .photo-container {{ display: flex; margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }}
-            .photo-thumbnail {{ flex: 1; max-width: 200px; margin-right: 20px; }}
-            .photo-thumbnail img {{ max-width: 100%; height: auto; }}
-            .photo-details {{ flex: 3; }}
-            .photo-comments {{ flex: 2; margin-left: 20px; font-style: italic; color: #555; }}
+            .results-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+            .results-table th, .results-table td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+            .results-table th {{ background-color: #f5f5f5; font-weight: bold; }}
+            .row-number {{ width: 10%; text-align: center; font-weight: bold; }}
+            .comment-cell {{ width: 60%; }}
+            .thumbnail-cell {{ width: 30%; text-align: center; }}
+            .thumbnail-img {{ max-width: 200px; max-height: 150px; border: 1px solid #ddd; }}
             .defect-summary {{ margin: 5px 0; }}
-            .comments {{ margin: 5px 0; }}
-            .row-number {{ font-weight: bold; margin-bottom: 10px; }}
+            .comments {{ margin: 5px 0; font-style: italic; color: #555; }}
             .page-break {{ page-break-before: always; }}
         </style>
     </head>
@@ -215,19 +216,36 @@ def create_html_report(project_name, area_results, user_comments):
             <div class="project-name">{project_name}</div>
             <div class="date">Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
         </div>
+        
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th class="row-number">#</th>
+                    <th class="comment-cell">Defect Description & Comments</th>
+                    <th class="thumbnail-cell">Thumbnail</th>
+                </tr>
+            </thead>
+            <tbody>
     """
     
+    row_count = 0
     for area_name, photos in area_results.items():
         area_has_defects = any(photo_result['has_defects'] for photo_result in photos.values())
         
         if area_has_defects:
-            html_content += f'<div class="area-section">'
-            html_content += f'<div class="area-title">Area: {area_name}</div>'
+            # Add area header
+            row_count += 1
+            html_content += f"""
+            <tr>
+                <td colspan="3" style="background-color: #e9ecef; font-weight: bold;">
+                    Area: {area_name}
+                </td>
+            </tr>
+            """
             
-            photo_count = 0
             for filename, result in photos.items():
                 if result['has_defects']:
-                    photo_count += 1
+                    row_count += 1
                     defect_summary = ", ".join([
                         f"{count} {defect_type}{'s' if count > 1 else ''}" 
                         for defect_type, count in result['defect_counts'].items()
@@ -242,24 +260,25 @@ def create_html_report(project_name, area_results, user_comments):
                     user_comment = user_comments.get(area_name, {}).get(filename, "")
                     
                     html_content += f'''
-                    <div class="photo-container">
-                        <div class="photo-thumbnail">
-                            <img src="data:image/jpeg;base64,{img_str}" alt="Annotated Image">
-                        </div>
-                        <div class="photo-details">
-                            <div class="row-number">#{photo_count}</div>
+                    <tr>
+                        <td class="row-number">{row_count}</td>
+                        <td class="comment-cell">
                             <div class="defect-summary"><strong>Defects:</strong> {defect_summary}</div>
                             <div class="defect-summary"><strong>Summary:</strong> {result['analysis']}</div>
-                        </div>
-                        <div class="photo-comments">
                             <div class="comments"><strong>Comments:</strong> {user_comment}</div>
-                        </div>
-                    </div>
+                        </td>
+                        <td class="thumbnail-cell">
+                            <img src="data:image/jpeg;base64,{img_str}" alt="Annotated Image" class="thumbnail-img">
+                        </td>
+                    </tr>
                     '''
-            
-            html_content += '</div>'
     
-    html_content += "</body></html>"
+    html_content += """
+            </tbody>
+        </table>
+    </body>
+    </html>
+    """
     return html_content
 
 # ----------------------------
@@ -275,6 +294,8 @@ if 'current_project' not in st.session_state:
     st.session_state.current_project = None
 if 'project_data' not in st.session_state:
     st.session_state.project_data = {}
+if 'uploaded_files_visible' not in st.session_state:
+    st.session_state.uploaded_files_visible = {}
 
 # Project Management Sidebar
 with st.sidebar:
@@ -327,6 +348,7 @@ if st.session_state.current_project:
                 project['areas'][new_area_name] = []
                 project['results'][new_area_name] = {}
                 project['comments'][new_area_name] = {}
+                st.session_state.uploaded_files_visible[new_area_name] = False
                 st.success(f"Added area: {new_area_name}")
             else:
                 st.warning("Area already exists!")
@@ -354,54 +376,24 @@ if st.session_state.current_project:
                 if uploaded_files:
                     project['areas'][area_name] = uploaded_files
                 
-                # Show individual photo analysis with "Use AI Summary" button
-                if area_name in project['results'] and project['results'][area_name]:
-                    st.subheader("📸 Photo Analysis")
-                    for filename, result in project['results'][area_name].items():
-                        with st.expander(f"Photo: {filename}", expanded=False):
-                            if result['has_defects']:
-                                # Create three columns for the layout
-                                col1, col2, col3 = st.columns([1, 2, 2])
-                                
-                                with col1:
-                                    # Row number (using index for simplicity)
-                                    idx = list(project['results'][area_name].keys()).index(filename) + 1
-                                    st.write(f"**#{idx}**")
-                                
-                                with col2:
-                                    # Thumbnail
-                                    thumbnail = result['annotated_image'].copy()
-                                    thumbnail.thumbnail((200, 200))
-                                    st.image(thumbnail, use_container_width=True)
-                                
-                                with col3:
-                                    # Defect description
-                                    defect_summary = ", ".join([
-                                        f"{count} {defect_type}{'s' if count > 1 else ''}" 
-                                        for defect_type, count in result['defect_counts'].items()
-                                    ])
-                                    st.write(f"**Defects:** {defect_summary}")
-                                    st.write("**Summary:**", result['analysis'])
-                                    
-                                    # "Use AI Summary" button
-                                    if st.button("📋 Use AI Summary", key=f"ai_btn_{area_name}_{filename}", use_container_width=True):
-                                        # Populate text area with AI analysis
-                                        project['comments'][area_name][filename] = result['analysis']
-                                        st.rerun()
-                                    
-                                    # User comments text area
-                                    comment_key = f"comment_{area_name}_{filename}"
-                                    user_comment = st.text_area(
-                                        "Add your observations:",
-                                        value=project['comments'][area_name].get(filename, ""),
-                                        height=100,
-                                        key=comment_key
-                                    )
-                                    
-                                    # Store user comment
-                                    project['comments'][area_name][filename] = user_comment
-                            else:
-                                st.success("✅ No defects detected in this photo")
+                # Show uploaded files list (minimized by default)
+                if uploaded_files:
+                    # Initialize visibility state if not exists
+                    if area_name not in st.session_state.uploaded_files_visible:
+                        st.session_state.uploaded_files_visible[area_name] = False
+                    
+                    # Toggle button for uploaded files list
+                    if st.button(
+                        f"{'▼' if st.session_state.uploaded_files_visible[area_name] else '►'} Show Uploaded Files ({len(uploaded_files)})",
+                        key=f"toggle_{area_name}"
+                    ):
+                        st.session_state.uploaded_files_visible[area_name] = not st.session_state.uploaded_files_visible[area_name]
+                    
+                    # Show uploaded files list if expanded
+                    if st.session_state.uploaded_files_visible[area_name]:
+                        st.write("**Uploaded Files:**")
+                        for file in uploaded_files:
+                            st.write(f"- {file.name}")
     
     # Single "Analyze All Areas" button
     if project['areas'] and any(project['areas'].values()):
@@ -465,7 +457,7 @@ if st.session_state.current_project:
         col2.metric("Photos with Defects", total_photos_with_defects)
         col3.metric("Total Defects", total_defects)
         
-        # Display results with thumbnails
+        # Display results with 3 columns: row number, comment, thumbnail
         for area_name, area_results in project['results'].items():
             area_has_defects = any(result['has_defects'] for result in area_results.values())
             
@@ -477,20 +469,16 @@ if st.session_state.current_project:
                         if result['has_defects']:
                             photo_count += 1
                             
-                            # Create four columns for the layout
-                            col1, col2, col3, col4 = st.columns([1, 2, 2, 2])
+                            # Create three columns for the layout
+                            col1, col2, col3 = st.columns([1, 3, 2])
                             
                             with col1:
                                 # Row number
-                                st.write(f"**#{photo_count}**")
+                                st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 18px; padding: 10px;'>#{photo_count}</div>", 
+                                           unsafe_allow_html=True)
                             
                             with col2:
-                                # Create thumbnail
-                                thumbnail = result['annotated_image'].copy()
-                                thumbnail.thumbnail((200, 200))
-                                st.image(thumbnail, use_container_width=True)
-                            
-                            with col3:
+                                # Defect description and comments (3 times wider)
                                 defect_summary = ", ".join([
                                     f"{count} {defect_type}{'s' if count > 1 else ''}" 
                                     for defect_type, count in result['defect_counts'].items()
@@ -498,25 +486,30 @@ if st.session_state.current_project:
                                 
                                 st.write(f"**Defects:** {defect_summary}")
                                 st.write(f"**Summary:** {result['analysis']}")
-                            
-                            with col4:
+                                
                                 # "Use AI Summary" button
                                 if st.button("📋 Use AI Summary", key=f"results_ai_btn_{area_name}_{filename}", use_container_width=True):
                                     # Populate text area with AI analysis
                                     project['comments'][area_name][filename] = result['analysis']
                                     st.rerun()
                                 
-                                # User comments text area
+                                # User comments text area (3 times wider)
                                 comment_key = f"results_comment_{area_name}_{filename}"
                                 user_comment = st.text_area(
                                     "Comments:",
                                     value=project['comments'][area_name].get(filename, ""),
-                                    height=100,
+                                    height=120,
                                     key=comment_key
                                 )
                                 
                                 # Store user comment
                                 project['comments'][area_name][filename] = user_comment
+                            
+                            with col3:
+                                # Create thumbnail
+                                thumbnail = result['annotated_image'].copy()
+                                thumbnail.thumbnail((250, 200))
+                                st.image(thumbnail, use_container_width=True)
                             
                             st.write("---")
         
@@ -555,8 +548,9 @@ with st.expander("ℹ️ How to Use"):
     - Single "Analyze All Areas" button
     - "Use AI Summary" button for quick comments
     - Thumbnail view of defective photos
-    - HTML report generation
+    - HTML report generation with 3 columns
     - Running count of defects and affected areas
+    - Detailed defect descriptions (hairline crack, spalling, etc.)
     """)
 
 st.markdown("---")
